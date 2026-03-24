@@ -1,41 +1,38 @@
 .TH OPENMERC 1 "$(date +%Y-%m-%d)" "openmerc 0.2.0" "User Commands"
 .SH NAME
-openmerc \- diffusion‑powered LLM terminal UI
+openmerc \- a fast, parallel LLM CLI tool
 .SH SYNOPSIS
 openmerc [OPTIONS]
 .SH DESCRIPTION
-openmerc is a terminal UI for interacting with a diffusion‑powered language model. By default it launches the interactive UI. It can also run in headless mode or initialise a configuration file.
+openmerc provides a terminal UI for interacting with LLMs. It can also run in headless mode for scripting.
 .SH OPTIONS
 .TP
-.BR -h, --help
-Show help message and exit.
+--headless PROMPT
+Run in headless mode, reading the prompt from the command line and outputting the response.
 .TP
-.BR -V, --version
-Show version information and exit.
-.TP
-.BR --headless " "PROMPT
-Run in headless mode, feeding the given PROMPT to the model and printing the result.
-.TP
-.BR --init
+--init
 Create a default .openmerc.toml configuration file in the current directory.
 .TP
-.BR --session " "NAME
-Resume a previously saved session with the given NAME.
+--session NAME
+Resume a previously saved session identified by NAME.
+.TP
+--version
+Print version information and exit.
+.TP
+-h, --help
+Show this help message and exit.
 .SH EXAMPLES
-.B Launch UI:
-.n
+.TP
 openmerc
-
-.B Headless mode:
-.n
+Start the interactive TUI.
+.TP
 openmerc --headless "Explain quantum computing"
-
-.B Initialise config:
-.n
+Run headlessly with the given prompt.
+.TP
 openmerc --init
-
-.B Resume session:
-.n
-openmerc --session "my‑project"
+Create a default configuration file.
+.TP
+openmerc --session work
+Resume the "work" session.
 .SH AUTHOR
 Jeremy Stover <jeremy@example.com>

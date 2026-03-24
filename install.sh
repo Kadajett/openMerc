@@ -1,16 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
-# Build release
+# Build the release binary
 cargo build --release
 
-# Install binary to /usr/local/bin
-BIN_NAME=openmerc
-TARGET="target/release/$BIN_NAME"
-if [ -f "$TARGET" ]; then
-  sudo cp "$TARGET" /usr/local/bin/$BIN_NAME
-  echo "Installed $BIN_NAME to /usr/local/bin"
-else
-  echo "Binary not found at $TARGET"
-  exit 1
-fi
+# Install to /usr/local/bin
+install -Dm755 target/release/openmerc /usr/local/bin/openmerc
+
+echo "openmerc installed to /usr/local/bin"

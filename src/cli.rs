@@ -5,12 +5,8 @@ use clap::Parser;
 #[clap(author, version, about, long_about = None)]
 pub struct Cli {
     /// Run in headless mode with the given prompt
-    #[clap(long, requires = "prompt")]
-    pub headless: bool,
-
-    /// Prompt to use when headless mode is enabled
-    #[clap(long, requires = "headless")]
-    pub prompt: Option<String>,
+    #[clap(long, value_name = "PROMPT")]
+    pub headless: Option<String>,
 
     /// Initialize a new configuration file
     #[clap(long)]
