@@ -13,6 +13,7 @@ mod api;
 mod context;
 
 mod semfora;
+mod headless;
 
 use anyhow::Result;
 use crossterm::{
@@ -48,6 +49,19 @@ fn restore_terminal() {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Check for headless mode before any UI setup
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--headless") {
+        // Collect everything after the flag as the prompt
+        let prompt = if let Some(idx) = args.iter().position(|a| a == "--headless") {
+            args.iter().skip(idx + 1).cloned().collect::<Vec<String>>().join(" ")
+        } else {
+            "".to_string()
+        };
+        // Run headless and exit
+        return headless::run_headless(&prompt).await;
+    }
+
     // Set up panic hook to restore terminal
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
