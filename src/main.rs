@@ -418,10 +418,10 @@ fn handle_input_key(
                                 app.conversation.push_message(Role::User, message.clone());
                                 // Auto title naming: set title based on first user message
                                 if app.conversation.title == "New Chat" {
-                                    let words: Vec<&str> = message.split_whitespace().take(6).collect();
+                                    let words: Vec<&str> = message.split_whitespace().take(4).collect();
                                     let mut title = words.join(" ");
-                                    if title.len() > 30 {
-                                        title.truncate(30);
+                                    if title.len() > 25 {
+                                        title = crate::logger::safe_truncate(&title, 25).to_string();
                                     }
                                     app.conversation.title = title.clone();
                                     app.conversation.push_message(Role::System, format!("Session title set to: {}", title));
