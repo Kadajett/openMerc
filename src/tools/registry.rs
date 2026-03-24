@@ -404,6 +404,37 @@ pub fn tool_definitions() -> Vec<ToolDef> {
                 }),
             },
         },
+        // --- Mercury Edit tools ---
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: FunctionDef {
+                name: "apply_edit".to_string(),
+                description: "Surgically merge a code change using Mercury Edit. Takes original code and an update snippet with '// ... existing code ...' markers. Returns the merged result. Much more efficient than rewriting entire files.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "original_code": { "type": "string", "description": "The original source code" },
+                        "update_snippet": { "type": "string", "description": "The update with // ... existing code ... markers" }
+                    },
+                    "required": ["original_code", "update_snippet"]
+                }),
+            },
+        },
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: FunctionDef {
+                name: "fim_complete".to_string(),
+                description: "Fill-in-the-middle autocomplete using Mercury Edit. Given a prefix and suffix, generates the code that goes between them.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "prompt": { "type": "string", "description": "Code before the cursor (prefix)" },
+                        "suffix": { "type": "string", "description": "Code after the cursor (suffix)" }
+                    },
+                    "required": ["prompt", "suffix"]
+                }),
+            },
+        },
     ]
 }
 
@@ -653,6 +684,25 @@ pub async fn execute_tool(ctx: &ToolContext, tool_call: &ToolCall) -> String {
         "tmux_kill_pane" => {
             let pane_id = args["pane_id"].as_str().unwrap_or("");
             super::tmux::tmux_kill_pane(pane_id)
+        }
+        // --- Mercury Edit tools ---
+        "apply_edit" => {
+            let original = args["original_code"].as_str().unwrap_or("");
+            let snippet = args["update_snippet"].as_str().unwrap_or("");
+            let config = crate::config::Config::load(workspace).unwrap_or_default();
+            match crate::api::apply_edit::apply_edit(&config.mercury.base_url, &config.mercury.api_key, original, snippet).await {
+                Ok(result) => result,
+                Err(e) => format!("apply_edit failed: {e}"),
+            }
+        }
+        "fim_complete" => {
+            let prompt = args["prompt"].as_str().unwrap_or("");
+            let suffix = args["suffix"].as_str().unwrap_or("");
+            let config = crate::config::Config::load(workspace).unwrap_or_default();
+            match crate::api::fim::fim(&config.mercury.base_url, &config.mercury.api_key, prompt, suffix).await {
+                Ok(result) => result,
+                Err(e) => format!("fim_complete failed: {e}"),
+            }
         }
         other => format!("Unknown tool: {other}"),
     }
