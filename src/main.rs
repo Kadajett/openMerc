@@ -363,19 +363,33 @@ fn handle_key(
     honcho: &Arc<Mutex<HonchoContext>>,
     system_prompt: &str,
 ) {
-    if key.modifiers.contains(KeyModifiers::CONTROL) {
-        match key.code {
-            KeyCode::Char('q') => {
-                app.should_quit = true;
-                return;
+    // Ctrl+Q always quits immediately
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('q') {
+        app.should_quit = true;
+        return;
+    }
+
+    // Ctrl+C: cancel in-flight operation if loading, otherwise quit
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        if app.loading {
+            if let Some(token) = app.cancel_token.take() {
+                token.cancel();
             }
-            KeyCode::Char('c') => {
-                // TODO: Cancel in-progress operation when loading
-                app.should_quit = true;
-                return;
-            }
-            _ => {}
+            app.loading = false;
+            app.stream_buffer.clear();
+            app.agent_progress = None;
+            app.pending_tools.clear();
+            app.conversation.push_message(Role::System, "Cancelled.".to_string());
+        } else {
+            app.should_quit = true;
         }
+        return;
+    }
+
+    // Escape always works — switch to chat mode (even during loading)
+    if key.code == KeyCode::Esc {
+        app.focus = FocusPanel::Chat;
+        return;
     }
 
     match app.focus {
@@ -430,6 +444,7 @@ fn handle_input_key(
                             let workspace = app.workspace.clone();
                             let tasks_arc = Arc::new(Mutex::new(app.tasks.clone()));
                             let cancel = tokio_util::sync::CancellationToken::new();
+                            app.cancel_token = Some(cancel.clone());
                             let task_context = app.tasks_as_context().unwrap_or_default();
                             let extra_context = injected_context;
 

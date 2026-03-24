@@ -101,11 +101,12 @@ pub fn tmux_split(direction: &str, command: Option<&str>) -> String {
 }
 
 /// Kill a tmux pane. Refuses to kill the pane we're running in.
+/// Uses TMUX_PANE env var which is stable across split-window operations.
 pub fn tmux_kill_pane(pane_id: &str) -> String {
-    // Safety: don't kill our own pane
-    let our_pane = run_tmux(&["display-message", "-p", "#{pane_id}"]);
-    if our_pane.trim() == pane_id {
-        return format!("Refused to kill own pane {pane_id}. Use tmux_kill_pane on other panes only.");
+    let our_pane = std::env::var("TMUX_PANE")
+        .unwrap_or_else(|_| run_tmux(&["display-message", "-p", "#{pane_id}"]).trim().to_string());
+    if our_pane == pane_id {
+        return format!("Refused to kill own pane {pane_id}.");
     }
     run_tmux(&["kill-pane", "-t", pane_id]);
     format!("Killed pane {pane_id}")

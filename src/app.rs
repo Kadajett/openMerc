@@ -174,6 +174,9 @@ pub struct App {
 
     /// Duration of the last completed request
     pub last_duration: Option<std::time::Duration>,
+
+    /// Cancellation token for the current in-flight request
+    pub cancel_token: Option<tokio_util::sync::CancellationToken>,
 }
 
 /// A single tool call log entry
@@ -209,6 +212,7 @@ impl App {
             pending_tools: Vec::new(),
             request_started: None,
             last_duration: None,
+            cancel_token: None,
         }
     }
 
