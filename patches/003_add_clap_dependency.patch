@@ -1,0 +1,9 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@
+ [dependencies]
+@@
+ toml = "0.8"
++clap = { version = "4", features = ["derive"] }
+*** End Patch
+PATCH

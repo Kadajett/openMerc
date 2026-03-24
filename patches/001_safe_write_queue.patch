@@ -1,0 +1,74 @@
+--- a/src/tools/files.rs
++++ b/src/tools/files.rs
+@@
+-use anyhow::Result;
+-use std::path::Path;
+-
+-use super::sandbox::resolve_sandboxed;
++use anyhow::Result;
++use std::path::Path;
++
++use super::sandbox::resolve_sandboxed;
++use once_cell::sync::Lazy;
++use std::sync::Mutex;
++
++// Global queue for source‑file writes. Stored as (path, content).
++static PENDING_CHANGES: Lazy<Mutex<Vec<(String, String)>>> = Lazy::new(|| Mutex::new(Vec::new()));
+@@
+-    let resolved = resolve_sandboxed(workspace, path)?;
++    // If the target is inside the src/ directory, queue the change instead of writing now.
++    if path.starts_with("src/") {
++        // Queue via App helper – we ignore the result here because the caller only expects a diff.
++        crate::app::queue_change(path.to_string(), content.to_string());
++        return Ok(format!("Change queued for {} – will be applied on next restart.", path));
++    }
++
++    let resolved = resolve_sandboxed(workspace, path)?;
+--- a/src/app.rs
++++ b/src/app.rs
+@@
+-use std::path::PathBuf;
+-use chrono::{DateTime, Utc};
+-use serde::{Deserialize, Serialize};
+-use uuid::Uuid;
++use std::path::PathBuf;
++use chrono::{DateTime, Utc};
++use serde::{Deserialize, Serialize};
++use uuid::Uuid;
++use once_cell::sync::Lazy;
++use std::sync::Mutex;
+@@
+ pub struct App {
+@@
+ }
+@@
+ impl App {
+@@
+ }
++
++// Global queue for source‑file writes. Stored as (path, content).
++static PENDING_CHANGES: Lazy<Mutex<Vec<(String, String)>>> = Lazy::new(|| Mutex::new(Vec::new()));
++
++impl App {
++    /// Queue a write to a source file. Called from `tools::files::write_file` when the
++    /// target path starts with "src/".
++    pub fn queue_change(path: String, content: String) {
++        PENDING_CHANGES.lock().unwrap().push((path, content));
++    }
++
++    /// Apply all pending source‑file changes. Should be called on graceful shutdown.
++    pub fn apply_pending(&self) -> anyhow::Result<()> {
++        let mut pending = PENDING_CHANGES.lock().unwrap();
++        for (path, content) in pending.drain(..) {
++            // Resolve the sandboxed absolute path.
++            let resolved = crate::tools::sandbox::resolve_sandboxed(&self.workspace, &path)?;
++            if let Some(parent) = resolved.parent() {
++                std::fs::create_dir_all(parent)?;
++            }
++            std::fs::write(resolved, content)?;
++        }
++        Ok(())
++    }
++}
+*** End Patch
+PATCH

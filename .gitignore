@@ -1,0 +1,9 @@
+/target
+.openmerc.toml
+.openmerc/
+.semfora_index.*
+.claude/
+salmon_checklist.txt
+run_semfora_index.sh
+*.swp
+*.swo
