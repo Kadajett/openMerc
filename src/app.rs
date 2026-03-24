@@ -1,3 +1,4 @@
+// Updated App struct to include focus_dir for /focus command
 use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -155,6 +156,9 @@ pub struct App {
     /// Which panel has focus
     pub focus: FocusPanel,
 
+    /// Focus directory for quick navigation (optional)
+    pub focus_dir: Option<PathBuf>,
+
     /// Chat scroll offset (from bottom)
     pub chat_scroll: u16,
 
@@ -228,6 +232,7 @@ impl App {
             input: String::new(),
             cursor_pos: 0,
             focus: FocusPanel::Input,
+            focus_dir: None,
             chat_scroll: 0,
             should_quit: false,
             loading: false,
