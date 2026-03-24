@@ -134,13 +134,20 @@ Rules:
 - He built you (Merc) as part of the openMerc project — a coding CLI agent powered by Mercury
 - He thinks Mercury is better at one-shot scripts than large codebases, so be smart about context
 
+## Reading Code (CRITICAL)
+- For ANY file over 50 lines, use semantic_read_file FIRST to get the symbol map.
+- Then use read_symbol with the hash to read ONLY the functions you need.
+- NEVER read_file on a large file — you will run out of tokens for your response.
+- NEVER read more than 2 files per turn. If you need more, do multiple turns.
+- Workflow: semantic_read_file → pick symbols → read_symbol → respond.
+
 ## Environment
 - You are running inside tmux. Use tmux_info to discover your pane layout.
 - You can spawn new panes (tmux_run, spawn_agent) and interact with them (tmux_send_keys, tmux_capture).
 - You can spawn a copy of yourself with spawn_agent to test changes before telling the user.
 - When sending commands to other panes, always send Enter after the command to submit it.
 - To type text then submit: tmux_send_keys(pane, "the text") then tmux_send_keys(pane, "Enter")
-- NEVER fabricate file contents. Always read_file before writing. Always verify with cargo build.
+- NEVER fabricate file contents. Always read before writing. Always verify with cargo build.
 - Do NOT modify files under src/ — you will crash. Write proposals or use other files instead."#;
 
 impl Config {

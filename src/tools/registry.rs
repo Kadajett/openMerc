@@ -275,21 +275,50 @@ pub fn tool_definitions() -> Vec<ToolDef> {
                 }),
             },
         },
-        // --- New semantic read tool (most impactful missing feature) ---
+        // --- Semantic code reading (semfora-powered) ---
         ToolDef {
             tool_type: "function".to_string(),
             function: FunctionDef {
                 name: "semantic_read_file".to_string(),
-                description: "Read a file and return a concise semantic summary using Semfora. Includes cognitive complexity, risk, and key state changes. Helpful for quick code insight without dumping the whole file.".to_string(),
+                description: "Get a semantic overview of a file using Semfora: lists all functions/symbols with their line ranges, complexity, and risk. Use this FIRST before read_file on any file >50 lines. Then use read_symbol to read specific functions.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Relative path to the file within the workspace"
+                            "description": "Relative path to the file"
                         }
                     },
                     "required": ["path"]
+                }),
+            },
+        },
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: FunctionDef {
+                name: "read_symbol".to_string(),
+                description: "Read the source code of a specific function/symbol by its semfora hash, or read a line range from a file. Use after semantic_read_file to drill into specific functions without reading the whole file.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "hash": {
+                            "type": "string",
+                            "description": "Semfora symbol hash (from semantic_read_file output). E.g. 'e45e6708:26df3fcae0ff7978'"
+                        },
+                        "file": {
+                            "type": "string",
+                            "description": "File path (alternative to hash — use with start/end lines)"
+                        },
+                        "start_line": {
+                            "type": "integer",
+                            "description": "Start line number (1-indexed, use with file)"
+                        },
+                        "end_line": {
+                            "type": "integer",
+                            "description": "End line number (inclusive, use with file)"
+                        }
+                    },
+                    "required": []
                 }),
             },
         },
@@ -497,35 +526,97 @@ pub async fn execute_tool(ctx: &ToolContext, tool_call: &ToolCall) -> String {
                 Err(e) => format!("Failed to execute semfora-engine search: {}", e),
             }
         }
-        // --- New semantic read implementation ---
+        // --- Semantic file reading (semfora-powered, chunk-based) ---
         "semantic_read_file" => {
             let path = args["path"].as_str().unwrap_or("");
-            // Run semfora analyze on the file
-            let mut cmd = std::process::Command::new("semfora-engine");
-            cmd.arg("analyze").arg(path).current_dir(workspace);
-            match cmd.output() {
-                Ok(output) => {
-                    if output.status.success() {
-                        let raw = String::from_utf8_lossy(&output.stdout);
-                        // Extract key fields for a concise summary
-                        let mut summary = String::new();
-                        for line in raw.lines() {
-                            if line.contains("cognitive_complexity") || line.contains("behavioral_risk") || line.contains("max_nesting_depth") || line.contains("state_changes") {
-                                summary.push_str(line);
-                                summary.push('\n');
-                            }
+            let mut result = String::new();
+
+            // Step 1: Get file analysis summary
+            let analyze = std::process::Command::new("semfora-engine")
+                .args(["analyze", path])
+                .current_dir(workspace)
+                .output();
+            if let Ok(o) = &analyze {
+                if o.status.success() {
+                    let raw = String::from_utf8_lossy(&o.stdout);
+                    for line in raw.lines() {
+                        if line.contains("cognitive_complexity") || line.contains("behavioral_risk")
+                            || line.contains("max_nesting_depth") || line.contains("total_lines")
+                            || line.contains("purpose") {
+                            result.push_str(line.trim());
+                            result.push('\n');
                         }
-                        if summary.is_empty() {
-                            // Fallback: first 10 lines
-                            summary = raw.lines().take(10).collect::<Vec<_>>().join("\n");
-                        }
-                        summary
-                    } else {
-                        let err = String::from_utf8_lossy(&output.stderr);
-                        format!("semfora analyze failed: {}", err)
                     }
                 }
-                Err(e) => format!("Failed to execute semfora-engine analyze: {}", e),
+            }
+
+            // Step 2: Get symbol map with line ranges
+            let symbols = std::process::Command::new("semfora-engine")
+                .args(["query", "file", path, "--format", "json"])
+                .current_dir(workspace)
+                .output();
+            if let Ok(o) = &symbols {
+                if o.status.success() {
+                    let raw = String::from_utf8_lossy(&o.stdout);
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                        if let Some(syms) = v["symbols"].as_array() {
+                            result.push_str("\nSymbols (use read_symbol with hash to read source):\n");
+                            for s in syms {
+                                let name = s["name"].as_str().unwrap_or("?");
+                                let hash = s["hash"].as_str().unwrap_or("?");
+                                let kind = s["kind"].as_str().unwrap_or("?");
+                                let lines = s["lines"].as_str().unwrap_or("?");
+                                let risk = s["risk"].as_str().unwrap_or("?");
+                                result.push_str(&format!("  {kind} {name} [{lines}] risk={risk} hash={hash}\n"));
+                            }
+                        }
+                    }
+                }
+            }
+
+            if result.is_empty() {
+                // Fallback: just read first 20 lines
+                match files::read_file(workspace, path) {
+                    Ok(content) => {
+                        let preview: String = content.lines().take(20).collect::<Vec<_>>().join("\n");
+                        format!("(semfora unavailable, showing first 20 lines)\n{preview}")
+                    }
+                    Err(e) => format!("Error: {e}"),
+                }
+            } else {
+                result
+            }
+        }
+        "read_symbol" => {
+            let hash = args["hash"].as_str().unwrap_or("");
+            let file = args["file"].as_str().unwrap_or("");
+            let start = args["start_line"].as_u64().unwrap_or(0);
+            let end = args["end_line"].as_u64().unwrap_or(0);
+
+            if !hash.is_empty() {
+                // Read by symbol hash
+                let output = std::process::Command::new("semfora-engine")
+                    .args(["query", "source", "--hash", hash])
+                    .current_dir(workspace)
+                    .output();
+                match output {
+                    Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+                    Ok(o) => format!("semfora source query failed: {}", String::from_utf8_lossy(&o.stderr)),
+                    Err(e) => format!("Failed to run semfora: {e}"),
+                }
+            } else if !file.is_empty() && start > 0 && end > 0 {
+                // Read by file + line range
+                let output = std::process::Command::new("semfora-engine")
+                    .args(["query", "source", file, "--start", &start.to_string(), "--end", &end.to_string()])
+                    .current_dir(workspace)
+                    .output();
+                match output {
+                    Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+                    Ok(o) => format!("semfora source query failed: {}", String::from_utf8_lossy(&o.stderr)),
+                    Err(e) => format!("Failed to run semfora: {e}"),
+                }
+            } else {
+                "Provide either hash (from semantic_read_file) or file + start_line + end_line.".to_string()
             }
         }
         // --- Tmux tools ---
