@@ -1,6 +1,7 @@
 /target
 .openmerc.toml
 .openmerc/
+.merc/
 .semfora_index.*
 .claude/
 salmon_checklist.txt

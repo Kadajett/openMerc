@@ -15,6 +15,7 @@ mod context;
 mod semfora;
 mod headless;
 mod engine;
+mod merc_context;
 mod plan;
 mod progress;
 
@@ -109,7 +110,18 @@ async fn main() -> Result<()> {
 
     // App state
     let mut app = App::new(workspace.clone());
-    let system_prompt = config.agent.system_prompt.clone();
+
+    // Load project context from .merc/ folders
+    let project_ctx = merc_context::load_project_context(&workspace);
+    logger::log_event(&format!("Project: {} (id={}, {} context files)",
+        project_ctx.project_name, project_ctx.project_id, project_ctx.context_files.len()));
+    app.project_context = Some(project_ctx.clone());
+
+    // Build system prompt with project context injected
+    let mut system_prompt = config.agent.system_prompt.clone();
+    if !project_ctx.merged_context.is_empty() {
+        system_prompt = format!("{system_prompt}\n\n## Project Context (from .merc/)\n{}", project_ctx.merged_context);
+    }
     let _agent_name = config.agent.name.clone();
 
     // Session selection
@@ -195,6 +207,13 @@ async fn main() -> Result<()> {
         if h.is_enabled() {
             let _ = h.start_session().await;
             app.honcho_session_id = h.session_id().map(|s| s.to_string());
+            // Tag session with project identity
+            h.set_project_metadata(
+                &project_ctx.project_id,
+                &project_ctx.project_name,
+                project_ctx.git_branch.as_deref(),
+                &workspace.display().to_string(),
+            ).await;
         }
     }
 

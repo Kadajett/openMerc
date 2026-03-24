@@ -183,6 +183,33 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             }
             InputAction::Handled
         }
+        "/init" => {
+            let merc_dir = app.workspace.join(".merc");
+            let git_dir = merc_dir.join("git");
+            let _ = std::fs::create_dir_all(&git_dir);
+
+            // Create CONTEXT.md with project info
+            let project_name = app.workspace.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+
+            let context_path = merc_dir.join("CONTEXT.md");
+            if !context_path.exists() {
+                let content = format!("# {project_name}\n\nProject context for Merc. Edit this file to give Merc persistent knowledge about your project.\n\n## Overview\n(Describe your project here)\n\n## Conventions\n(Coding conventions, patterns, etc.)\n");
+                let _ = std::fs::write(&context_path, content);
+            }
+
+            let rules_path = merc_dir.join("RULES.md");
+            if !rules_path.exists() {
+                let _ = std::fs::write(&rules_path, "# Rules\n\nProject-specific rules for Merc.\n\n- (Add rules here)\n");
+            }
+
+            app.conversation.push_message(Role::System, format!(
+                "Initialized .merc/ in {}\n- CONTEXT.md (project overview)\n- RULES.md (conventions)\n- git/ (branch-specific context)\n\nEdit .merc/CONTEXT.md to give Merc knowledge about your project.",
+                merc_dir.display()
+            ));
+            InputAction::Handled
+        }
         "/model" => {
             if args.is_empty() {
                 app.conversation.push_message(Role::System, "Usage: /model <model-name>\nAvailable: mercury-2, mercury-edit".to_string());

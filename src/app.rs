@@ -205,6 +205,9 @@ pub struct App {
     /// Active execution plan (if in plan mode)
     pub active_plan: Option<crate::plan::Plan>,
 
+    /// Project context from .merc/ folders
+    pub project_context: Option<crate::merc_context::ProjectContext>,
+
     /// Files modified this session (path → diff string)
     pub modified_files: Vec<FileDiff>,
 
@@ -285,6 +288,7 @@ impl App {
             last_duration: None,
             cancel_token: None,
             active_plan: None,
+            project_context: None,
             modified_files: Vec::new(),
             diff_selected: 0,
             show_diff_panel: true,

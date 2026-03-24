@@ -94,6 +94,27 @@ impl HonchoContext {
         Ok(())
     }
 
+    /// Set project metadata on the current session so Honcho can scope queries
+    pub async fn set_project_metadata(&self, project_id: &str, project_name: &str, git_branch: Option<&str>, workspace: &str) {
+        if !self.enabled || !self.reachable { return; }
+        let Some(session_id) = &self.session_id else { return; };
+
+        let url = format!("{}/sessions/{}/metadata", self.ws_url(), session_id);
+        let metadata = serde_json::json!({
+            "project_id": project_id,
+            "project_name": project_name,
+            "git_branch": git_branch,
+            "workspace": workspace,
+            "agent": self.assistant_name,
+        });
+
+        let _ = self.client.put(&url)
+            .json(&metadata)
+            .send().await;
+
+        logger::log("HONCHO", &format!("Set session metadata: project={project_name} id={project_id}"));
+    }
+
     // ---- Workspace Search (the big one) ----
 
     /// Search across ALL Honcho conversations/spaces.
