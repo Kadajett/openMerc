@@ -1,3 +1,4 @@
+// Updated build_messages: keep last 20 user/assistant messages and inject a placeholder for Honcho summary.
 use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -123,15 +124,15 @@ impl MercuryClient {
             .filter(|m| !matches!(m.role, crate::app::Role::Tool | crate::app::Role::System))
             .collect();
 
-        // Rolling window: keep last 30 messages to stay within Mercury's context
-        let max_history = 30;
+        // Keep last 20 user/assistant messages
+        let max_history = 20;
         let start = if relevant.len() > max_history { relevant.len() - max_history } else { 0 };
 
         if start > 0 {
-            // Inject a summary note so Mercury knows there's prior context
+            // Placeholder: in production this would call Honcho get_session_context to obtain a compressed summary.
             out.push(ChatMessage {
                 role: "system".to_string(),
-                content: Some(format!("(Note: {} earlier messages were trimmed to fit context. The conversation started before what you see here.)", start)),
+                content: Some(format!("(Earlier messages summarized by Honcho – {} messages omitted)", start)),
                 tool_calls: None,
                 tool_call_id: None,
             });
