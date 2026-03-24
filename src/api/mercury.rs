@@ -348,53 +348,75 @@ impl MercuryClient {
         };
         let mut chat_messages = self.build_messages(system_context, session_summary.as_deref(), messages);
 
-        // Phase 1: Try without tools first — let Mercury respond naturally
-        // Only escalate to tool-calling if the response indicates tools are needed
-        let first_req = ChatRequest {
-            model: self.model.clone(),
-            messages: chat_messages.clone(),
-            stream: false,
-            max_tokens: Some(self.max_tokens),
-            tools: None,  // No tools on first call
-            diffusing: false,
-        };
+        // Router: check if the last user message is a simple chat or needs tools
+        let last_user_msg = messages.iter().rev()
+            .find(|m| m.role == crate::app::Role::User)
+            .map(|m| m.content.to_lowercase())
+            .unwrap_or_default();
 
-        let needs_tools = match self.call_api(&first_req).await {
-            Ok(resp) => {
-                if let Some(usage) = &resp.usage {
-                    let _ = event_tx.send(AppEvent::TokensUsed(usage.total_tokens, usage.prompt_tokens, usage.completion_tokens));
+        // Simple heuristic: short messages without action words go straight to chat
+        let is_simple_chat = last_user_msg.len() < 100
+            && !last_user_msg.contains("create")
+            && !last_user_msg.contains("write")
+            && !last_user_msg.contains("read")
+            && !last_user_msg.contains("fix")
+            && !last_user_msg.contains("build")
+            && !last_user_msg.contains("run")
+            && !last_user_msg.contains("search")
+            && !last_user_msg.contains("task")
+            && !last_user_msg.contains("file")
+            && !last_user_msg.contains("code")
+            && !last_user_msg.contains("src/")
+            && !last_user_msg.contains("improve")
+            && !last_user_msg.contains("update")
+            && !last_user_msg.contains("add")
+            && !last_user_msg.contains("delete")
+            && !last_user_msg.contains("test")
+            && !last_user_msg.contains("commit")
+            && !last_user_msg.contains("analyze");
+
+        if is_simple_chat {
+            // Direct chat — no tools, just diffusion response
+            let chat_req = ChatRequest {
+                model: self.model.clone(),
+                messages: chat_messages.clone(),
+                stream: true,
+                max_tokens: Some(self.max_tokens),
+                tools: None,
+                diffusing: true,
+            };
+            match self.call_api_diffusing(&chat_req, &event_tx).await {
+                Ok(content) if !content.is_empty() => {
+                    let _ = event_tx.send(AppEvent::DiffusionUpdate(content));
+                    let _ = event_tx.send(AppEvent::StreamDone);
                 }
-                if let Some(choice) = resp.choices.first() {
-                    if let Some(content) = &choice.message.content {
-                        let lower = content.to_lowercase();
-                        // Mercury indicates it wants tools by mentioning them or asking to do work
-                        let tool_signals = ["let me", "i'll", "i will", "searching", "reading", "writing",
-                                          "creating", "running", "checking", "analyzing", "use write_file",
-                                          "use read_file", "use run_command", "use search", "use semfora",
-                                          "let me check", "let me look", "let me search", "let me read",
-                                          "i need to", "i should"];
-                        let wants_tools = tool_signals.iter().any(|s| lower.contains(s));
-
-                        if !wants_tools {
-                            // Simple response — send it directly via diffusion, skip tools
-                            let _ = event_tx.send(AppEvent::DiffusionUpdate(content.clone()));
-                            let _ = event_tx.send(AppEvent::StreamDone);
-                            return;
+                _ => {
+                    // Fallback non-streaming
+                    let fallback = ChatRequest {
+                        model: self.model.clone(),
+                        messages: chat_messages.clone(),
+                        stream: false,
+                        max_tokens: Some(self.max_tokens),
+                        tools: None,
+                        diffusing: false,
+                    };
+                    if let Ok(resp) = self.call_api(&fallback).await {
+                        if let Some(usage) = &resp.usage {
+                            let _ = event_tx.send(AppEvent::TokensUsed(usage.total_tokens, usage.prompt_tokens, usage.completion_tokens));
                         }
-                        true // Needs tools
-                    } else {
-                        true // Empty content, might need tools
+                        let content = resp.choices.first()
+                            .and_then(|c| c.message.content.as_ref())
+                            .cloned()
+                            .unwrap_or_else(|| "...".to_string());
+                        let _ = event_tx.send(AppEvent::DiffusionUpdate(content));
+                        let _ = event_tx.send(AppEvent::StreamDone);
                     }
-                } else {
-                    true
                 }
             }
-            Err(_) => true, // Error, try with tools
-        };
+            return;
+        }
 
-        if !needs_tools { return; }
-
-        // Phase 2: Tool-calling mode
+        // Tool-calling mode — full tool loop
         let tools = registry::tool_definitions();
         let max_rounds = 100_u32;
         match self.run_tool_loop(&mut chat_messages, &tools, max_rounds, tool_ctx, &event_tx, &cancel).await {
