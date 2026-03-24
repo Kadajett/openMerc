@@ -153,6 +153,8 @@ Rules:
 - If cargo check fails, read the error, fix it, and try again.
 - If you have open tasks, keep working through them after each response. Check list_tasks and continue.
 - After completing a write, always check if there are remaining tasks or more work to do.
+- When you finish all tasks and have made file changes, auto-commit with run_command: git add -A && git commit -m "description of changes"
+- After modifying src/ files, the user must restart you to pick up changes. Tell them when a restart is needed.
 - After modifying src/ files, the user must restart you to pick up changes. Tell them when a restart is needed."#;
 
 impl Config {
