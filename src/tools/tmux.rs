@@ -78,7 +78,7 @@ pub fn tmux_send_keys(pane_id: &str, keys: &str) -> String {
     }
 
     std::thread::sleep(std::time::Duration::from_millis(300));
-    format!("Sent to {pane_id}: {}", if keys.len() > 50 { &keys[..50] } else { keys })
+    format!("Sent to {pane_id}: {}", if keys.len() > 50 { crate::logger::safe_truncate(keys, 50) } else { keys })
 }
 
 /// Split the current window and return the new pane ID

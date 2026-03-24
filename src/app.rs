@@ -274,7 +274,7 @@ impl App {
             let mut lines = Vec::new();
             for t in &thinking {
                 let result_preview = t.result.as_deref()
-                    .map(|r| if r.len() > 80 { format!("{}...", &r[..80]) } else { r.to_string() })
+                    .map(|r| if r.len() > 80 { format!("{}...", crate::logger::safe_truncate(r, 80)) } else { r.to_string() })
                     .unwrap_or_default();
                 if result_preview.is_empty() {
                     lines.push(format!("  {} {}", t.name, t.args_summary));

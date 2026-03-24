@@ -271,7 +271,7 @@ fn format_search_results(body: &serde_json::Value) -> String {
                     peer.to_string()
                 };
                 let truncated = if content.len() > 400 {
-                    format!("{}...", &content[..400])
+                    format!("{}...", crate::logger::safe_truncate(content, 400))
                 } else {
                     content.to_string()
                 };
@@ -286,7 +286,7 @@ fn format_search_results(body: &serde_json::Value) -> String {
             for item in items.iter().take(8) {
                 if let Some(content) = item["content"].as_str() {
                     let truncated = if content.len() > 400 {
-                        format!("{}...", &content[..400])
+                        format!("{}...", crate::logger::safe_truncate(content, 400))
                     } else {
                         content.to_string()
                     };

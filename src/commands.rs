@@ -36,7 +36,7 @@ pub fn process_input(app: &mut App, raw_input: &str) -> InputAction {
                 Ok(content) => {
                     let lines = content.lines().count();
                     let truncated = if content.len() > 6000 {
-                        format!("{}...\n(truncated, {} total lines)", &content[..6000], lines)
+                        format!("{}...\n(truncated, {} total lines)", crate::logger::safe_truncate(&content, 6000), lines)
                     } else {
                         content
                     };
@@ -151,7 +151,7 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
                     Ok(content) => {
                         let lines = content.lines().count();
                         let display = if content.len() > 4000 {
-                            format!("{}...\n({lines} total lines)", &content[..4000])
+                            format!("{}...\n({lines} total lines)", crate::logger::safe_truncate(&content, 4000))
                         } else {
                             content
                         };

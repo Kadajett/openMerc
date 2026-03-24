@@ -6,14 +6,24 @@ use chrono::Utc;
 
 static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 
+/// Safe string truncation that respects UTF-8 char boundaries
+pub fn safe_truncate(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Initialize the logger with the workspace path
 pub fn init(workspace: &Path) {
     let path = workspace.join(".openmerc").join("debug.log");
-    // Ensure dir exists
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    // Truncate on startup
     let _ = std::fs::write(&path, format!("=== openMerc session started {} ===\n", Utc::now()));
     let _ = LOG_PATH.set(path);
 }
@@ -29,7 +39,7 @@ pub fn log(category: &str, message: &str) {
 /// Log an API request
 pub fn log_api_request(url: &str, body: &str) {
     let truncated = if body.len() > 2000 {
-        format!("{}... ({} bytes total)", &body[..2000], body.len())
+        format!("{}... ({} bytes total)", safe_truncate(body, 2000), body.len())
     } else {
         body.to_string()
     };
@@ -39,7 +49,7 @@ pub fn log_api_request(url: &str, body: &str) {
 /// Log an API response
 pub fn log_api_response(status: u16, body: &str) {
     let truncated = if body.len() > 2000 {
-        format!("{}... ({} bytes total)", &body[..2000], body.len())
+        format!("{}... ({} bytes total)", safe_truncate(body, 2000), body.len())
     } else {
         body.to_string()
     };
@@ -54,7 +64,7 @@ pub fn log_event(event: &str) {
 /// Log a tool call
 pub fn log_tool(name: &str, args: &str, result: &str) {
     let truncated_result = if result.len() > 500 {
-        format!("{}... ({} bytes)", &result[..500], result.len())
+        format!("{}... ({} bytes)", safe_truncate(result, 500), result.len())
     } else {
         result.to_string()
     };

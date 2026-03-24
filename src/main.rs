@@ -274,13 +274,13 @@ async fn main() -> Result<()> {
                             // Auto-create conclusion for meaningful exchanges
                             if meaningful {
                                 let summary = if assistant_clone.len() > 150 {
-                                    format!("{}...", &assistant_clone[..150])
+                                    format!("{}...", crate::logger::safe_truncate(&assistant_clone, 150))
                                 } else {
                                     assistant_clone
                                 };
                                 h.create_conclusion(&format!(
                                     "User asked: {}\nMerc did: {}",
-                                    if user_msg_clone.len() > 100 { &user_msg_clone[..100] } else { &user_msg_clone },
+                                    if user_msg_clone.len() > 100 { crate::logger::safe_truncate(&user_msg_clone, 100) } else { &user_msg_clone },
                                     summary
                                 )).await;
                             }
@@ -547,10 +547,10 @@ fn summarize_tool_args(name: &str, args_json: &str) -> String {
         }
         "run_command" => {
             let cmd = args["command"].as_str().unwrap_or("?");
-            if cmd.len() > 60 { format!("{}...", &cmd[..60]) } else { cmd.to_string() }
+            if cmd.len() > 60 { format!("{}...", crate::logger::safe_truncate(cmd, 60)) } else { cmd.to_string() }
         }
         _ => {
-            if args_json.len() > 40 { format!("{}...", &args_json[..40]) } else { args_json.to_string() }
+            if args_json.len() > 40 { format!("{}...", crate::logger::safe_truncate(args_json, 40)) } else { args_json.to_string() }
         }
     }
 }
