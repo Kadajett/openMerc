@@ -266,6 +266,17 @@ async fn main() -> Result<()> {
                             });
                         }
                         app.finalize_stream();
+                        // Fetch Honcho summaries for the Log tab
+                        {
+                            let honcho_ref = honcho.clone();
+                            let tx = event_tx.clone();
+                            tokio::spawn(async move {
+                                let h = honcho_ref.lock().await;
+                                if let Some(ctx) = h.get_session_context().await {
+                                    let _ = tx.send(AppEvent::HonchoSummary(ctx));
+                                }
+                            });
+                        }
                         // Auto-save session
                         let snapshot = session::snapshot_from_app(&app);
                         let ws = workspace.clone();
@@ -380,30 +391,9 @@ async fn main() -> Result<()> {
                         app.agent_progress = Some(app::AgentProgressInfo { round, max_rounds, current_action: action });
                     }
                     AppEvent::TaskUpdated(tasks) => {
-                        // Log newly completed tasks
-                        for new_task in &tasks {
-                            if new_task.status == app::TaskStatus::Completed {
-                                let was_not_done = app.tasks.iter()
-                                    .find(|t| t.id == new_task.id)
-                                    .map(|t| t.status != app::TaskStatus::Completed)
-                                    .unwrap_or(true);
-                                if was_not_done {
-                                    app.change_log.push(app::ChangeLogEntry {
-                                        timestamp: chrono::Utc::now(),
-                                        summary: format!("✓ Task completed: {}", new_task.title),
-                                    });
-                                }
-                            }
-                        }
                         app.tasks = tasks;
                     }
                     AppEvent::FileModified(path, diff) => {
-                        // Add to change log
-                        let lines_changed = diff.lines().filter(|l| l.starts_with('+') || l.starts_with('-')).count();
-                        app.change_log.push(app::ChangeLogEntry {
-                            timestamp: chrono::Utc::now(),
-                            summary: format!("Modified {} ({} lines changed)", path, lines_changed),
-                        });
 
                         if let Some(existing) = app.modified_files.iter_mut().find(|f| f.path == path) {
                             existing.diff = diff;
@@ -412,6 +402,12 @@ async fn main() -> Result<()> {
                             app.modified_files.push(app::FileDiff { path, diff, timestamp: chrono::Utc::now() });
                         }
                         app.diff_selected = app.modified_files.len().saturating_sub(1);
+                    }
+                    AppEvent::HonchoSummary(summary) => {
+                        app.change_log.push(app::ChangeLogEntry {
+                            timestamp: chrono::Utc::now(),
+                            summary,
+                        });
                     }
                     AppEvent::Resize(_, _) | AppEvent::Tick => {}
                 }

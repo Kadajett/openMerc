@@ -29,6 +29,8 @@ pub enum AppEvent {
     TaskUpdated(Vec<crate::app::Task>),
     /// A file was modified (path, diff)
     FileModified(String, String),
+    /// Honcho summary for the Log tab
+    HonchoSummary(String),
     /// Tick for UI refresh
     Tick,
 }

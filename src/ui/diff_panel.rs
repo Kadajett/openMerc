@@ -26,7 +26,7 @@ pub fn draw_diff_panel(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD)
         } else { Style::default().fg(Color::DarkGray) }),
         Span::raw(" "),
-        Span::styled(" Log ", if app.side_tab == SideTab::Log {
+        Span::styled(" Honcho ", if app.side_tab == SideTab::Log {
             Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
         } else { Style::default().fg(Color::DarkGray) }),
         Span::raw(" "),
@@ -103,7 +103,7 @@ fn draw_diff_tab(f: &mut Frame, app: &App, area: Rect) {
 fn draw_log_tab(f: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     if app.change_log.is_empty() {
-        lines.push(Line::from(Span::styled("No changes logged yet", Style::default().fg(Color::DarkGray))));
+        lines.push(Line::from(Span::styled("Waiting for Honcho summaries...", Style::default().fg(Color::DarkGray))));
     } else {
         for entry in &app.change_log {
             let time = entry.timestamp.format("%H:%M:%S").to_string();
@@ -120,7 +120,7 @@ fn draw_log_tab(f: &mut Frame, app: &App, area: Rect) {
         (total.saturating_sub(visible) as u16).saturating_sub(app.log_scroll)
     };
     let log_view = Paragraph::new(lines)
-        .block(Block::default().title(" Change Log ").borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)))
+        .block(Block::default().title(" Honcho Summaries ").borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)))
         .scroll((scroll, 0));
     f.render_widget(log_view, area);
 }
