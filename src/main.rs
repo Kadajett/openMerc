@@ -428,6 +428,9 @@ async fn main() -> Result<()> {
                             summary,
                         });
                     }
+                    AppEvent::TokensUsed(total, _prompt, _completion) => {
+                        app.total_tokens += total;
+                    }
                     AppEvent::Resize(_, _) | AppEvent::Tick => {}
                 }
             }

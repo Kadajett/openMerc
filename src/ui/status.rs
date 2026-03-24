@@ -79,6 +79,19 @@ pub fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         spans.push(Span::styled("ready", Style::default().fg(Color::Green)));
     }
 
+    // Token count
+    if app.total_tokens > 0 {
+        spans.push(Span::raw("  "));
+        let token_str = if app.total_tokens >= 1_000_000 {
+            format!("{}M tok", app.total_tokens / 1_000_000)
+        } else if app.total_tokens >= 1_000 {
+            format!("{:.1}K tok", app.total_tokens as f64 / 1000.0)
+        } else {
+            format!("{} tok", app.total_tokens)
+        };
+        spans.push(Span::styled(token_str, Style::default().fg(Color::DarkGray)));
+    }
+
     let status = Line::from(spans);
     let paragraph = Paragraph::new(status);
     f.render_widget(paragraph, area);

@@ -63,6 +63,18 @@ struct ToolCallFunctionRaw {
 #[derive(Deserialize, Debug)]
 struct ChatResponse {
     choices: Vec<Choice>,
+    #[serde(default)]
+    usage: Option<UsageInfo>,
+}
+
+#[derive(Deserialize, Debug)]
+struct UsageInfo {
+    #[serde(default)]
+    total_tokens: u32,
+    #[serde(default)]
+    prompt_tokens: u32,
+    #[serde(default)]
+    completion_tokens: u32,
 }
 
 #[derive(Deserialize, Debug)]
@@ -260,6 +272,10 @@ impl MercuryClient {
                 diffusing: false,
             };
             let resp = self.call_api(&req).await?;
+            // Track token usage
+            if let Some(usage) = &resp.usage {
+                let _ = tx.send(AppEvent::TokensUsed(usage.total_tokens, usage.prompt_tokens, usage.completion_tokens));
+            }
             let choice = resp.choices.first()
                 .ok_or_else(|| anyhow::anyhow!("No choices in response"))?;
             if let Some(tool_calls) = &choice.message.tool_calls {

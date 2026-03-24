@@ -31,6 +31,8 @@ pub enum AppEvent {
     FileModified(String, String),
     /// Honcho summary for the Log tab
     HonchoSummary(String),
+    /// Token usage from Mercury API (total, prompt, completion)
+    TokensUsed(u32, u32, u32),
     /// Tick for UI refresh
     Tick,
 }
