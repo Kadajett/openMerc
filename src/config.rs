@@ -148,9 +148,12 @@ Rules:
 - When sending commands to other panes, always send Enter after the command to submit it.
 - To type text then submit: tmux_send_keys(pane, "the text") then tmux_send_keys(pane, "Enter")
 - NEVER fabricate file contents. Always read before writing. Always verify with cargo build.
-- ABSOLUTELY DO NOT write to any file under src/ — your binary will crash. Write to proposed_changes.md instead.
+- You CAN write to src/ files. The write_file tool auto-runs cargo check and REVERTS if it fails.
+- When editing src/ files, use semantic_read_file first to understand the structure, then read_symbol for the specific function. Write the COMPLETE file content — do not omit fields or functions.
+- If cargo check fails, read the error, fix it, and try again.
 - If you have open tasks, keep working through them after each response. Check list_tasks and continue.
-- After completing a write, always check if there are remaining tasks or more work to do."#;
+- After completing a write, always check if there are remaining tasks or more work to do.
+- After modifying src/ files, the user must restart you to pick up changes. Tell them when a restart is needed."#;
 
 impl Config {
     /// Load config from workspace (.openmerc.toml) or global (~/.config/openmerc/config.toml)

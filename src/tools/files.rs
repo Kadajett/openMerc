@@ -30,31 +30,65 @@ pub fn read_file(workspace: &Path, path: &str) -> Result<String> {
 }
 
 /// Write content to a file, sandboxed to workspace.
-/// Returns a unified diff of changes (empty string for new files).
+/// For src/ files: writes, runs `cargo check`, reverts on failure.
+/// Returns a unified diff of changes.
 pub fn write_file(workspace: &Path, path: &str, content: &str) -> Result<String> {
-    // *** Semfora advisory ***
-    // Load Semfora index and warn if the target file belongs to a high‑risk module.
     if let Ok(Some(advice)) = crate::semfora::advise_path(workspace, path) {
-        // Log the advisory for debugging; we do not abort, just surface the warning.
         crate::logger::log("SEMFORA", &advice);
     }
 
     let resolved = resolve_sandboxed(workspace, path)?;
 
-    // Read old content for diff (if file exists)
+    // Save old content for diff and potential revert
     let old_content = std::fs::read_to_string(&resolved).unwrap_or_default();
     let is_new = !resolved.exists();
+    let is_source = path.starts_with("src/") || path.ends_with(".rs");
 
     // Ensure parent directory exists
     if let Some(parent) = resolved.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
+    // Write the file
     std::fs::write(&resolved, content)?;
+
+    // For source files: verify with cargo check, revert on failure
+    if is_source {
+        crate::logger::log("WRITE", &format!("Source file {path} written, running cargo check..."));
+        let check = std::process::Command::new("cargo")
+            .arg("check")
+            .current_dir(workspace)
+            .output();
+
+        match check {
+            Ok(output) if !output.status.success() => {
+                // Revert the write
+                if is_new {
+                    let _ = std::fs::remove_file(&resolved);
+                } else {
+                    let _ = std::fs::write(&resolved, &old_content);
+                }
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                // Extract just the error lines
+                let errors: String = stderr.lines()
+                    .filter(|l| l.contains("error"))
+                    .take(5)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                crate::logger::log("WRITE", &format!("REVERTED {path} — cargo check failed"));
+                anyhow::bail!("cargo check FAILED — file reverted. Errors:\n{errors}\n\nFix the errors and try again.");
+            }
+            Ok(_) => {
+                crate::logger::log("WRITE", &format!("{path} passed cargo check"));
+            }
+            Err(e) => {
+                crate::logger::log("WRITE", &format!("cargo check could not run: {e}"));
+            }
+        }
+    }
 
     // Generate diff
     if is_new {
-        // Show new file as all-adds diff
         let mut diff = format!("--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{} @@\n", content.lines().count());
         for line in content.lines() {
             diff.push_str(&format!("+{line}\n"));
