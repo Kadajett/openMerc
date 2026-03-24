@@ -46,6 +46,21 @@ pub fn next_action(plan: &mut Plan, config: &EngineConfig) -> EngineAction {
         ));
     }
 
+    // Stall detection: if we've run 3+ cycles without completing any new tasks, stop
+    if plan.cycle_count >= 3 {
+        let recent_completed: usize = plan.progress.cycles.iter()
+            .rev().take(3)
+            .flat_map(|c| &c.tasks_completed)
+            .count();
+        if recent_completed == 0 && plan.completed_count() < plan.tasks.len() {
+            plan.phase = PlanPhase::Paused;
+            return EngineAction::Complete(format!(
+                "Stalled: no tasks completed in last 3 cycles. {} tasks remain. Pausing for user input.",
+                plan.tasks.len() - plan.completed_count()
+            ));
+        }
+    }
+
     plan.cycle_count += 1;
 
     match &plan.phase {
@@ -146,24 +161,24 @@ fn build_execution_prompt(plan: &Plan, config: &EngineConfig) -> String {
     let recent = plan.progress.recent_summary(2);
     let done = plan.completed_count();
     let total = plan.tasks.len();
+    let existing_ids = plan.tasks.iter()
+        .map(|t| format!("{}({})", t.id, t.title))
+        .collect::<Vec<_>>()
+        .join(", ");
 
-    format!(
-        r#"You are in EXECUTION mode. Progress: {done}/{total} tasks complete. Cycle {}.
-
-{recent}
-
-## Focus tasks this cycle (work on these):
-{focus_tasks}
-
-Rules:
-- Mark each task in_progress when you start, completed when done.
-- Use add_task_note after completing work to record what you did.
-- If you discover new work, create subtasks with parent_id.
-- If you get stuck, mark the task blocked with a note explaining why.
-- After completing a task, move to the next focus task.
-- Auto-commit your changes with git when you finish a batch."#,
-        plan.cycle_count
-    )
+    let mut prompt = String::new();
+    prompt.push_str(&format!("You are in EXECUTION mode. Progress: {done}/{total} tasks complete. Cycle {}.\n\n", plan.cycle_count));
+    prompt.push_str(&recent);
+    prompt.push_str("\n\n## Focus tasks this cycle (work on these):\n");
+    prompt.push_str(&focus_tasks);
+    prompt.push_str(&format!("\n\nRules:\n\
+        - DO NOT create duplicate tasks. Existing: {existing_ids}\n\
+        - Mark each task in_progress when you start, completed when done.\n\
+        - Use add_task_note to record what you did.\n\
+        - If a write keeps failing cargo check, mark the task BLOCKED. Do not retry more than twice.\n\
+        - After completing a task, move to the next.\n\
+        - Auto-commit with git when you finish a batch."));
+    prompt
 }
 
 fn build_review_prompt(plan: &Plan) -> String {
