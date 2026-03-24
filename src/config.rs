@@ -151,6 +151,7 @@ Rules:
 - You CAN write to src/ files. The write_file tool auto-runs cargo check and REVERTS if it fails.
 - When editing src/ files, use semantic_read_file first to understand the structure, then read_symbol for the specific function. Write the COMPLETE file content — do not omit fields or functions.
 - If cargo check fails, read the error, fix it, and try again.
+- ALWAYS use write_file tool to create files. NEVER just describe code in your response — write it to disk.
 - If you have open tasks, keep working through them after each response. Check list_tasks and continue.
 - After completing a write, always check if there are remaining tasks or more work to do.
 - When you finish all tasks and have made file changes, auto-commit with run_command: git add -A && git commit -m "description of changes"
