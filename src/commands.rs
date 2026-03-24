@@ -1,6 +1,7 @@
 use crate::app::{App, Role, AppMode};
 use crate::tools::{files, tasks as task_tools};
 use crate::session;
+use std::process::Command;
 
 /// Result of processing user input
 pub enum InputAction {
@@ -18,13 +19,10 @@ pub enum InputAction {
 /// Process user input — detect slash commands, @file mentions, ^thought queries
 pub fn process_input(app: &mut App, raw_input: &str) -> InputAction {
     let trimmed = raw_input.trim();
-
-    // Slash commands
     if trimmed.starts_with('/') {
         return handle_slash_command(app, trimmed);
     }
 
-    // Parse @file mentions and ^thought queries from the message
     let mut injected = Vec::new();
     let mut cleaned_message = String::new();
     let mut thoughts_to_query = Vec::new();
@@ -36,7 +34,11 @@ pub fn process_input(app: &mut App, raw_input: &str) -> InputAction {
                 Ok(content) => {
                     let lines = content.lines().count();
                     let truncated = if content.len() > 6000 {
-                        format!("{}...\n(truncated, {} total lines)", crate::logger::safe_truncate(&content, 6000), lines)
+                        format!(
+                            "{}...\n(truncated, {} total lines)",
+                            crate::logger::safe_truncate(&content, 6000),
+                            lines
+                        )
                     } else {
                         content
                     };
@@ -53,7 +55,6 @@ pub fn process_input(app: &mut App, raw_input: &str) -> InputAction {
                     );
                 }
             }
-            // Keep the @mention in the message so Merc knows about it
             cleaned_message.push_str(word);
             cleaned_message.push(' ');
         } else if word.starts_with('^') && word.len() > 1 {
@@ -67,8 +68,6 @@ pub fn process_input(app: &mut App, raw_input: &str) -> InputAction {
         }
     }
 
-    // ^thought queries get resolved async in main.rs (need honcho access)
-    // Store them as a hint in injected context — main.rs will resolve them
     for thought in &thoughts_to_query {
         injected.push(format!("__THOUGHT_QUERY__:{thought}"));
     }
@@ -119,12 +118,10 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             InputAction::Handled
         }
         "/rename" => {
-            // Alias for /title but also persist the change to the session index
             if args.is_empty() {
                 app.conversation.push_message(Role::System, "Usage: /rename <new-title>".to_string());
             } else {
                 app.conversation.title = args.to_string();
-                // Persist the updated title in the session index
                 let persisted = session::snapshot_from_app(app);
                 let _ = session::save_session(&app.workspace, &persisted);
                 app.conversation.push_message(Role::System, format!("Session renamed to: {args}"));
@@ -132,32 +129,25 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             InputAction::Handled
         }
         "/branch" => {
-            // Show current git branch for the workspace
             match session::git_branch(&app.workspace) {
-                Some(branch) => {
-                    app.conversation.push_message(Role::System, format!("Current git branch: {branch}"));
-                }
-                None => {
-                    app.conversation.push_message(Role::System, "Not a git repository or unable to determine branch.".to_string());
-                }
+                Some(branch) => app.conversation.push_message(Role::System, format!("Current git branch: {branch}")),
+                None => app.conversation.push_message(Role::System, "Not a git repository or unable to determine branch.".to_string()),
             }
             InputAction::Handled
         }
         "/commit" => {
-            // Commit changes in the workspace with a message
             if args.is_empty() {
                 app.conversation.push_message(Role::System, "Usage: /commit <message>".to_string());
             } else {
                 let msg = args.trim();
-                // Stage all changes
-                let add_status = std::process::Command::new("git")
+                let add_status = Command::new("git")
                     .arg("add")
                     .arg(".")
                     .current_dir(&app.workspace)
                     .status();
                 match add_status {
                     Ok(status) if status.success() => {
-                        let commit_output = std::process::Command::new("git")
+                        let commit_output = Command::new("git")
                             .arg("commit")
                             .arg("-m")
                             .arg(msg)
@@ -186,34 +176,19 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             }
             InputAction::Handled
         }
-        "/clear" => {
-            app.conversation.messages.clear();
-            app.conversation.push_message(Role::System, "Chat cleared. Session preserved.".to_string());
-            InputAction::Handled
-        }
-        "/diff" | "/changes" => {
-            app.show_diff_panel = !app.show_diff_panel;
-            let state = if app.show_diff_panel { "shown" } else { "hidden" };
-            app.conversation.push_message(Role::System, format!("Diff panel {state}. {} files modified.", app.modified_files.len()));
-            InputAction::Handled
-        }
         "/model" => {
             if args.is_empty() {
                 app.conversation.push_message(Role::System, "Usage: /model <model-name>\nAvailable: mercury-2, mercury-edit".to_string());
             } else {
-                app.conversation.push_message(Role::System, format!("Model switching not yet implemented. Current: mercury-2"));
+                app.conversation.push_message(Role::System, "Model switching not yet implemented. Current: mercury-2".to_string());
             }
             InputAction::Handled
         }
         "/files" | "/ls" => {
             let path = if args.is_empty() { "." } else { args };
             match files::list_dir(&app.workspace, path) {
-                Ok(entries) => {
-                    app.conversation.push_message(Role::System, format!("## {path}\n{}", entries.join("\n")));
-                }
-                Err(e) => {
-                    app.conversation.push_message(Role::System, format!("Error: {e}"));
-                }
+                Ok(entries) => app.conversation.push_message(Role::System, format!("## {path}\n{}", entries.join("\n"))),
+                Err(e) => app.conversation.push_message(Role::System, format!("Error: {e}")),
             }
             InputAction::Handled
         }
@@ -231,9 +206,7 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
                         };
                         app.conversation.push_message(Role::System, format!("## {args}\n```\n{display}\n```"));
                     }
-                    Err(e) => {
-                        app.conversation.push_message(Role::System, format!("Error: {e}"));
-                    }
+                    Err(e) => app.conversation.push_message(Role::System, format!("Error: {e}")),
                 }
             }
             InputAction::Handled
@@ -242,7 +215,6 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             if args.is_empty() {
                 app.conversation.push_message(Role::System, "Usage: /think <query> — search project memory in Honcho".to_string());
             } else {
-                // Return as a thought query to be resolved async
                 return InputAction::Chat {
                     message: String::new(),
                     injected_context: vec![format!("__THOUGHT_QUERY__:{args}")],
@@ -259,7 +231,6 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
                 let description = split.next();
                 let msg = task_tools::create_task(&mut app.tasks, title, description);
                 app.conversation.push_message(Role::System, msg);
-                // Force plan mode
                 app.app_mode = AppMode::Plan;
             }
             InputAction::Handled
@@ -271,16 +242,120 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
                 let id = args.trim();
                 let msg = task_tools::update_task(&mut app.tasks, id, Some("completed"), None, None);
                 app.conversation.push_message(Role::System, msg);
-                // Return to normal mode after approval
                 app.app_mode = AppMode::Normal;
             }
             InputAction::Handled
         }
-        _ => {
-            app.conversation.push_message(
-                Role::System,
-                format!("Unknown command: {cmd}. Type /help for available commands."),
+        // New command: /git – show git status, recent commits, diff summary
+        "/git" => {
+            let status = Command::new("git").arg("status").arg("--short").current_dir(&app.workspace).output();
+            let log = Command::new("git").arg("log").arg("-n").arg("5").current_dir(&app.workspace).output();
+            let diff = Command::new("git").arg("diff").arg("--stat").current_dir(&app.workspace).output();
+            let mut out = String::new();
+            match status {
+                Ok(s) => out.push_str(&format!("## Git status\n{}\n", String::from_utf8_lossy(&s.stdout))),
+                Err(e) => out.push_str(&format!("Error git status: {e}\n")),
+            }
+            match log {
+                Ok(l) => out.push_str(&format!("## Recent commits (last 5)\n{}\n", String::from_utf8_lossy(&l.stdout))),
+                Err(e) => out.push_str(&format!("Error git log: {e}\n")),
+            }
+            match diff {
+                Ok(d) => out.push_str(&format!("## Diff summary\n{}\n", String::from_utf8_lossy(&d.stdout))),
+                Err(e) => out.push_str(&format!("Error git diff: {e}\n")),
+            }
+            app.conversation.push_message(Role::System, out);
+            InputAction::Handled
+        }
+        // New command: /stats – session statistics
+        "/stats" => {
+            let msg_count = app.conversation.messages.len();
+            let tool_calls = app.pending_tools.len();
+            let duration = if let Some(start) = app.request_started {
+                std::time::Instant::now().duration_since(start).as_secs()
+            } else {
+                0
+            };
+            let stats = format!(
+                "## Session stats\nMessages sent: {}\nPending tool calls: {}\nSession time (s): {}\n",
+                msg_count, tool_calls, duration
             );
+            app.conversation.push_message(Role::System, stats);
+            InputAction::Handled
+        }
+        // New command: /about – easter egg introducing Mercury
+        "/about" => {
+            let intro = "I am Mercury, a fast‑no‑nonsense coding agent powered by diffusion LLMs.\n";
+            let caps = "Capabilities: read/write/search files, generate/refactor/debug code, run shell commands, manage tasks, and integrate Semfora for deep code analysis.\n";
+            let vibe = "Sharp, direct, and always ready to act – no fluff.\n";
+            let msg = format!("## About Me\n{}\n{}\n{}", intro, caps, vibe);
+            app.conversation.push_message(Role::System, msg);
+            InputAction::Handled
+        }
+        // New command: /review – run semfora analysis on the whole workspace and summarize
+        "/review" => {
+            let result = Command::new("semfora-engine")
+                .arg("analyze")
+                .arg(".")
+                .output();
+            match result {
+                Ok(out) => {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    let display = if stdout.len() > 800 {
+                        format!("{}...\n(truncated)", &stdout[..800])
+                    } else {
+                        stdout.to_string()
+                    };
+                    app.conversation.push_message(Role::System, format!("## Semfora analysis (summary)\n```json\n{display}\n```"));
+                }
+                Err(e) => {
+                    app.conversation.push_message(Role::System, format!("Error running semfora analyze: {e}"));
+                }
+            }
+            InputAction::Handled
+        }
+        // New command: /search – combine semfora code search and memory dump search
+        "/search" => {
+            if args.is_empty() {
+                app.conversation.push_message(Role::System, "Usage: /search <query>".to_string());
+            } else {
+                let query = args.trim();
+                let mut combined = String::new();
+                let code_res = Command::new("semfora-engine")
+                    .arg("search")
+                    .arg(query)
+                    .output();
+                match code_res {
+                    Ok(out) => {
+                        let out_str = String::from_utf8_lossy(&out.stdout);
+                        combined.push_str("## Code search results\n");
+                        combined.push_str(&out_str);
+                    }
+                    Err(e) => {
+                        combined.push_str(&format!("Error running semfora search: {e}\n"));
+                    }
+                }
+                let mem_res = Command::new("grep")
+                    .arg("-i")
+                    .arg(query)
+                    .arg("memory_dump.md")
+                    .output();
+                match mem_res {
+                    Ok(out) => {
+                        let out_str = String::from_utf8_lossy(&out.stdout);
+                        combined.push_str("\n## Memory search results\n");
+                        combined.push_str(&out_str);
+                    }
+                    Err(e) => {
+                        combined.push_str(&format!("Error searching memory dump: {e}\n"));
+                    }
+                }
+                app.conversation.push_message(Role::System, combined);
+            }
+            InputAction::Handled
+        }
+        _ => {
+            app.conversation.push_message(Role::System, format!("Unknown command: {cmd}. Type /help for available commands."));
             InputAction::Handled
         }
     }
@@ -299,6 +374,13 @@ const HELP_TEXT: &str = r#"## Commands
 /cat, /read <file> — Read a file
 /think <query>     — Search project memory (Honcho)
 /model <name>      — Switch model (TODO)
+
+/ Added commands
+/git              — Show git status, recent commits, diff summary
+/stats            — Show session statistics
+/about            — About Mercury
+/review           — Run Semfora analysis on workspace
+/search <query>   — Search code via Semfora and memory dump
 
 ## Mentions
 @path/to/file      — Attach file contents to your message
