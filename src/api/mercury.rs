@@ -230,13 +230,13 @@ impl MercuryClient {
             }
             // Compact tool history: if msgs is getting large, summarize old tool results
             // Keep system prompt + last 40 messages, summarize the rest
-            if msgs.len() > 50 {
+            if msgs.len() > 30 {
                 let system_msgs: Vec<ChatMessage> = msgs.iter()
                     .take_while(|m| m.role == "system")
                     .cloned()
                     .collect();
                 let sys_count = system_msgs.len();
-                let tail: Vec<ChatMessage> = msgs[msgs.len().saturating_sub(40)..].to_vec();
+                let tail: Vec<ChatMessage> = msgs[msgs.len().saturating_sub(20)..].to_vec();
                 let trimmed_count = msgs.len() - sys_count - tail.len();
                 let mut compacted = system_msgs;
                 if trimmed_count > 0 {
@@ -296,9 +296,15 @@ impl MercuryClient {
                         let tasks = tool_ctx.tasks.lock().await.clone();
                         let _ = tx.send(AppEvent::TaskUpdated(tasks));
                     }
+                    // Truncate large tool results to avoid blowing 128K context
+                    let truncated_result = if result.len() > 4000 {
+                        format!("{}...\n(truncated from {} bytes)", logger::safe_truncate(&result, 4000), result.len())
+                    } else {
+                        result
+                    };
                     msgs.push(ChatMessage {
                         role: "tool".to_string(),
-                        content: Some(result),
+                        content: Some(truncated_result),
                         tool_calls: None,
                         tool_call_id: tc.id.clone(),
                     });

@@ -417,7 +417,15 @@ pub async fn execute_tool(ctx: &ToolContext, tool_call: &ToolCall) -> String {
         "read_file" => {
             let path = args["path"].as_str().unwrap_or("");
             match files::read_file(workspace, path) {
-                Ok(content) => content,
+                Ok(content) => {
+                    // For large files, auto-redirect to semantic summary + hint
+                    if content.lines().count() > 100 {
+                        let preview: String = content.lines().take(30).collect::<Vec<_>>().join("\n");
+                        format!("(File is {} lines — showing first 30. Use semantic_read_file for the symbol map, then read_symbol for specific functions.)\n\n{preview}\n...", content.lines().count())
+                    } else {
+                        content
+                    }
+                }
                 Err(e) => format!("Error reading file: {e}"),
             }
         }
