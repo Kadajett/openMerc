@@ -321,6 +321,34 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             }
             InputAction::Handled
         }
+        // New command: /quickfix – run semfora-engine validate on the project and show results
+        "/quickfix" => {
+            let result = Command::new("semfora-engine")
+                .arg("validate")
+                .arg(".")
+                .output();
+            match result {
+                Ok(out) => {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    let mut msg = String::new();
+                    if out.status.success() {
+                        msg.push_str("## Semfora validation passed\n\n```\n");
+                        msg.push_str(&stdout);
+                        msg.push_str("\n```\n");
+                    } else {
+                        msg.push_str("## Semfora validation failed\n\n```\n");
+                        msg.push_str(&stderr);
+                        msg.push_str("\n```\n");
+                    }
+                    app.conversation.push_message(Role::System, msg);
+                }
+                Err(e) => {
+                    app.conversation.push_message(Role::System, format!("Error running semfora validate: {e}"));
+                }
+            }
+            InputAction::Handled
+        }
         // New command: /search – combine semfora code search and memory dump search
         "/search" => {
             if args.is_empty() {
