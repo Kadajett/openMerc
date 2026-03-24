@@ -5,22 +5,31 @@ use std::process::Command;
 pub fn tmux_info() -> String {
     let session = run_tmux(&["display-message", "-p", "#{session_name}"]);
     let window = run_tmux(&["display-message", "-p", "#{window_index}:#{window_name}"]);
-    let pane = run_tmux(&["display-message", "-p", "#{pane_id}"]);
+    let our_pane = std::env::var("TMUX_PANE").unwrap_or_else(|_|
+        run_tmux(&["display-message", "-p", "#{pane_id}"]).trim().to_string()
+    );
     let pane_count = run_tmux(&["list-panes", "-F", "#{pane_id}"]);
     let all_panes: Vec<&str> = pane_count.trim().lines().collect();
+    let other_panes: Vec<&&str> = all_panes.iter().filter(|p| **p != our_pane).collect();
 
     format!(
-        "tmux session: {}\nwindow: {}\ncurrent pane: {}\ntotal panes: {}\npane ids: {}",
+        "tmux session: {}\nwindow: {}\nYOUR pane (do NOT send keys here): {}\nother panes you can target: {}\ntotal panes: {}",
         session.trim(),
         window.trim(),
-        pane.trim(),
+        our_pane,
+        if other_panes.is_empty() { "none — use spawn_agent to create one".to_string() } else { other_panes.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ") },
         all_panes.len(),
-        all_panes.join(", ")
     )
 }
 
 /// Run a command in a specific tmux pane (or current pane if pane_id is empty)
 pub fn tmux_run(pane_id: &str, command: &str) -> String {
+    // Safety: refuse to target our own pane
+    let our_pane = std::env::var("TMUX_PANE").unwrap_or_default();
+    if !our_pane.is_empty() && !pane_id.is_empty() && our_pane == pane_id {
+        return format!("Refused: {pane_id} is your own pane. Use empty pane_id to create a new pane.");
+    }
+
     let target = if pane_id.is_empty() {
         // Run in a new split pane
         let output = run_tmux(&[
@@ -58,6 +67,12 @@ pub fn tmux_capture(pane_id: &str, lines: u32) -> String {
 /// Regular text is typed literally (use -l flag).
 /// If text ends with \n, Enter is sent automatically after.
 pub fn tmux_send_keys(pane_id: &str, keys: &str) -> String {
+    // Safety: refuse to send keys to our own pane
+    let our_pane = std::env::var("TMUX_PANE").unwrap_or_default();
+    if !our_pane.is_empty() && our_pane == pane_id {
+        return format!("Refused: {pane_id} is your own pane. Send keys to OTHER panes only.");
+    }
+
     let special = ["Enter", "Escape", "C-c", "C-d", "Up", "Down", "Left", "Right", "Tab",
                     "BSpace", "Space", "C-a", "C-e", "C-k", "C-u", "C-l"];
 
