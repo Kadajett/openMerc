@@ -163,18 +163,16 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             tool_type: "function".to_string(),
             function: FunctionDef {
                 name: "create_task".to_string(),
-                description: "Create a task to track work. Use this to break down multi-step changes into trackable items.".to_string(),
+                description: "Create a task to track work. Use this to break down multi-step changes into trackable items. Supports priorities, dependencies, subtasks, and round estimates.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "title": {
-                            "type": "string",
-                            "description": "Short title for the task"
-                        },
-                        "description": {
-                            "type": "string",
-                            "description": "Optional detailed description"
-                        }
+                        "title": { "type": "string", "description": "Short title for the task" },
+                        "description": { "type": "string", "description": "Detailed description with acceptance criteria" },
+                        "priority": { "type": "integer", "description": "1 (highest) to 5 (lowest), default 3" },
+                        "depends_on": { "type": "array", "items": { "type": "string" }, "description": "Task IDs this depends on" },
+                        "parent_id": { "type": "string", "description": "Parent task ID if this is a subtask" },
+                        "estimated_rounds": { "type": "integer", "description": "Estimated tool rounds needed" }
                     },
                     "required": ["title"]
                 }),
@@ -219,6 +217,21 @@ pub fn tool_definitions() -> Vec<ToolDef> {
                     "type": "object",
                     "properties": {},
                     "required": []
+                }),
+            },
+        },
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: FunctionDef {
+                name: "add_task_note".to_string(),
+                description: "Append a progress note to a task. Notes survive context compaction so you remember what you did in previous cycles. Use after completing work on a task.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "Task ID" },
+                        "note": { "type": "string", "description": "What happened / context to preserve" }
+                    },
+                    "required": ["id", "note"]
                 }),
             },
         },
@@ -509,8 +522,14 @@ pub async fn execute_tool(ctx: &ToolContext, tool_call: &ToolCall) -> String {
         "create_task" => {
             let title = args["title"].as_str().unwrap_or("Untitled");
             let description = args["description"].as_str();
+            let priority = args["priority"].as_u64().map(|p| p as u8);
+            let depends_on = args["depends_on"].as_array().map(|a| {
+                a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+            });
+            let parent_id = args["parent_id"].as_str();
+            let estimated_rounds = args["estimated_rounds"].as_u64().map(|r| r as u16);
             let mut task_list = ctx.tasks.lock().await;
-            tasks::create_task(&mut task_list, title, description)
+            tasks::create_task(&mut task_list, title, description, priority, depends_on, parent_id, estimated_rounds)
         }
         "update_task" => {
             let id = args["id"].as_str().unwrap_or("");
@@ -519,6 +538,12 @@ pub async fn execute_tool(ctx: &ToolContext, tool_call: &ToolCall) -> String {
             let description = args["description"].as_str();
             let mut task_list = ctx.tasks.lock().await;
             tasks::update_task(&mut task_list, id, status, title, description)
+        }
+        "add_task_note" => {
+            let id = args["id"].as_str().unwrap_or("");
+            let note = args["note"].as_str().unwrap_or("");
+            let mut task_list = ctx.tasks.lock().await;
+            tasks::add_task_note(&mut task_list, id, note)
         }
         "list_tasks" => {
             let task_list = ctx.tasks.lock().await;

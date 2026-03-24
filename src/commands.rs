@@ -236,7 +236,7 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
                 let mut split = args.splitn(2, ' ');
                 let title = split.next().unwrap();
                 let description = split.next();
-                let msg = task_tools::create_task(&mut app.tasks, title, description);
+                let msg = task_tools::create_task(&mut app.tasks, title, description, None, None, None, None);
                 app.conversation.push_message(Role::System, msg);
                 app.app_mode = AppMode::Plan;
             }
@@ -602,7 +602,7 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
                                     if num > 10 {
                                         let title = format!("Refactor high‑complexity code ({} )", num);
                                         let desc = format!("Semfora reported high complexity: {}", line.trim());
-                                        let _ = task_tools::create_task(&mut app.tasks, &title, Some(&desc));
+                                        let _ = task_tools::create_task(&mut app.tasks, &title, Some(&desc), None, None, None, None);
                                         created += 1;
                                     }
                                 }
@@ -611,7 +611,7 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
                         if line.contains("risk") && line.to_lowercase().contains("high") {
                             let title = "Address high‑risk code".to_string();
                             let desc = format!("Semfora flagged a high‑risk area: {}", line.trim());
-                            let _ = task_tools::create_task(&mut app.tasks, &title, Some(&desc));
+                            let _ = task_tools::create_task(&mut app.tasks, &title, Some(&desc), None, None, None, None);
                             created += 1;
                         }
                     }
@@ -794,7 +794,7 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             } else {
                 // Create a task with the given title (args)
                 let title = args.trim();
-                let msg = task_tools::create_task(&mut app.tasks, title, None);
+                let msg = task_tools::create_task(&mut app.tasks, title, None, None, None, None, None);
                 app.conversation.push_message(Role::System, msg);
                 // Auto‑commit the new todo file (if any changes)
                 let _ = Command::new("git").arg("add").arg(".").current_dir(&app.workspace).status();

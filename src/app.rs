@@ -40,9 +40,25 @@ pub struct Task {
     pub title: String,
     pub status: TaskStatus,
     pub description: Option<String>,
+    #[serde(default = "default_priority")]
+    pub priority: u8,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub estimated_rounds: Option<u16>,
+    #[serde(default)]
+    pub actual_rounds: u16,
+    #[serde(default)]
+    pub notes: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(default)]
+    pub completed_at: Option<DateTime<Utc>>,
 }
+
+fn default_priority() -> u8 { 3 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -341,6 +357,10 @@ impl App {
             return None;
         }
         let mut lines = vec!["## Current Tasks".to_string()];
+        let done = self.tasks.iter().filter(|t| t.status == TaskStatus::Completed).count();
+        let total = self.tasks.len();
+        lines.push(format!("Progress: {done}/{total} completed\n"));
+
         for task in &self.tasks {
             let icon = match task.status {
                 TaskStatus::Completed => "[x]",
@@ -353,12 +373,17 @@ impl App {
                 TaskStatus::Blocked => " BLOCKED:",
                 _ => "",
             };
+            let priority = format!("P{}", task.priority);
+            let deps = if task.depends_on.is_empty() { String::new() } else {
+                format!(" (depends: {})", task.depends_on.join(", "))
+            };
             let desc = task.description.as_deref().unwrap_or("");
             let desc_part = if desc.is_empty() { String::new() } else { format!(" — {desc}") };
-            lines.push(format!("- {icon}{status_label} {}{desc_part}", task.title));
+            let last_note = task.notes.last().map(|n| format!(" [note: {}]", crate::logger::safe_truncate(n, 60))).unwrap_or_default();
+            lines.push(format!("- {icon} [{priority}]{status_label} {}{desc_part}{deps}{last_note}", task.title));
         }
         lines.push(String::new());
-        lines.push("Use create_task, update_task, list_tasks tools to manage tasks.".to_string());
+        lines.push("Use create_task, update_task, list_tasks, add_task_note tools to manage tasks.".to_string());
         Some(lines.join("\n"))
     }
 }
