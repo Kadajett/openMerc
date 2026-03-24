@@ -14,6 +14,9 @@ mod context;
 
 mod semfora;
 mod headless;
+mod engine;
+mod plan;
+mod progress;
 
 use anyhow::Result;
 use crossterm::{
@@ -267,32 +270,84 @@ async fn main() -> Result<()> {
                         let snapshot = session::snapshot_from_app(&app);
                         let ws = workspace.clone();
                         tokio::spawn(async move { let _ = session::save_session(&ws, &snapshot); });
-                        // Auto-continue if pending tasks
-                        let has_pending = app.tasks.iter().any(|t| matches!(t.status, app::TaskStatus::Pending | app::TaskStatus::InProgress));
-                        if has_pending && !app.loading {
-                            app.loading = true;
-                            app.request_started = Some(std::time::Instant::now());
-                            app.pending_tools.clear();
-                            app.last_duration = None;
-                            let mercury = mercury.clone();
-                            let honcho = honcho.clone();
-                            let base_prompt = system_prompt.to_string();
-                            let mut messages = app.conversation.messages.clone();
-                            messages.push(app::Message { id: uuid::Uuid::new_v4().to_string(), role: app::Role::User, content: "Continue working on the remaining tasks. Use list_tasks to see what is left, then work on the next one.".to_string(), timestamp: chrono::Utc::now() });
-                            let tx = event_tx.clone();
-                            let workspace_clone = app.workspace.clone();
-                            let tasks_arc = Arc::new(Mutex::new(app.tasks.clone()));
-                            let cancel = tokio_util::sync::CancellationToken::new();
-                            app.cancel_token = Some(cancel.clone());
-                            let task_context = app.tasks_as_context().unwrap_or_default();
-                            let tasks_for_sync = tasks_arc.clone();
-                            tokio::spawn(async move {
-                                let mut enriched_prompt = { let h = honcho.lock().await; h.enrich_system_prompt(&base_prompt, "continue tasks").await };
-                                if !task_context.is_empty() { enriched_prompt = format!("{enriched_prompt}\n\n{task_context}"); }
-                                let tool_ctx = tools::registry::ToolContext { workspace: workspace_clone, tasks: tasks_for_sync, honcho: honcho.clone() };
-                                mercury.chat(Some(&enriched_prompt), &messages, tool_ctx, tx, cancel).await;
-                            });
-                            logger::log_event("Auto-continue: pending tasks detected, sending follow-up");
+                        // Engine-driven auto-continue
+                        if let Some(mut plan) = app.active_plan.take() {
+                            // Sync tasks from app to plan
+                            plan.tasks = app.tasks.clone();
+                            let engine_config = engine::EngineConfig::default();
+                            let action = engine::next_action(&mut plan, &engine_config);
+
+                            match action {
+                                engine::EngineAction::Continue(prompt) => {
+                                    app.loading = true;
+                                    app.request_started = Some(std::time::Instant::now());
+                                    app.pending_tools.clear();
+                                    app.last_duration = None;
+                                    let mercury = mercury.clone();
+                                    let honcho = honcho.clone();
+                                    let base_prompt = system_prompt.to_string();
+                                    let mut messages = app.conversation.messages.clone();
+                                    messages.push(app::Message { id: uuid::Uuid::new_v4().to_string(), role: app::Role::User, content: prompt, timestamp: chrono::Utc::now() });
+                                    let tx = event_tx.clone();
+                                    let workspace_clone = app.workspace.clone();
+                                    let tasks_arc = Arc::new(Mutex::new(app.tasks.clone()));
+                                    let cancel = tokio_util::sync::CancellationToken::new();
+                                    app.cancel_token = Some(cancel.clone());
+                                    let task_context = app.tasks_as_context().unwrap_or_default();
+                                    let tasks_for_sync = tasks_arc.clone();
+                                    tokio::spawn(async move {
+                                        let mut enriched_prompt = { let h = honcho.lock().await; h.enrich_system_prompt(&base_prompt, "continue tasks").await };
+                                        if !task_context.is_empty() { enriched_prompt = format!("{enriched_prompt}\n\n{task_context}"); }
+                                        let tool_ctx = tools::registry::ToolContext { workspace: workspace_clone, tasks: tasks_for_sync, honcho: honcho.clone() };
+                                        mercury.chat(Some(&enriched_prompt), &messages, tool_ctx, tx, cancel).await;
+                                    });
+                                    logger::log_event(&format!("Engine continue: phase={}", plan.phase));
+                                    app.active_plan = Some(plan);
+                                }
+                                engine::EngineAction::PhaseTransition(phase, msg) => {
+                                    app.conversation.push_message(app::Role::System, format!("⚙ {msg}"));
+                                    logger::log_event(&format!("Engine phase transition: {phase}"));
+                                    app.active_plan = Some(plan);
+                                }
+                                engine::EngineAction::Complete(summary) => {
+                                    app.conversation.push_message(app::Role::System, format!("✓ {summary}"));
+                                    app.active_plan = None;
+                                    logger::log_event("Engine: plan completed");
+                                }
+                                engine::EngineAction::BudgetExhausted(msg) => {
+                                    app.conversation.push_message(app::Role::System, format!("⚠ {msg}"));
+                                    app.active_plan = None;
+                                }
+                                engine::EngineAction::Paused => {
+                                    app.active_plan = Some(plan);
+                                }
+                            }
+                        } else {
+                            // Legacy auto-continue for tasks without a plan
+                            let has_pending = app.tasks.iter().any(|t| matches!(t.status, app::TaskStatus::Pending | app::TaskStatus::InProgress));
+                            if has_pending && !app.loading {
+                                app.loading = true;
+                                app.request_started = Some(std::time::Instant::now());
+                                app.pending_tools.clear();
+                                let mercury = mercury.clone();
+                                let honcho = honcho.clone();
+                                let base_prompt = system_prompt.to_string();
+                                let mut messages = app.conversation.messages.clone();
+                                messages.push(app::Message { id: uuid::Uuid::new_v4().to_string(), role: app::Role::User, content: "Continue working on the remaining tasks.".to_string(), timestamp: chrono::Utc::now() });
+                                let tx = event_tx.clone();
+                                let workspace_clone = app.workspace.clone();
+                                let tasks_arc = Arc::new(Mutex::new(app.tasks.clone()));
+                                let cancel = tokio_util::sync::CancellationToken::new();
+                                app.cancel_token = Some(cancel.clone());
+                                let task_context = app.tasks_as_context().unwrap_or_default();
+                                let tasks_for_sync = tasks_arc.clone();
+                                tokio::spawn(async move {
+                                    let mut enriched_prompt = { let h = honcho.lock().await; h.enrich_system_prompt(&base_prompt, "continue tasks").await };
+                                    if !task_context.is_empty() { enriched_prompt = format!("{enriched_prompt}\n\n{task_context}"); }
+                                    let tool_ctx = tools::registry::ToolContext { workspace: workspace_clone, tasks: tasks_for_sync, honcho: honcho.clone() };
+                                    mercury.chat(Some(&enriched_prompt), &messages, tool_ctx, tx, cancel).await;
+                                });
+                            }
                         }
                     }
                     AppEvent::ToolUse(name, args) => {

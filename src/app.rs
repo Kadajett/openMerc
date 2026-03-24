@@ -202,6 +202,9 @@ pub struct App {
     /// Cancellation token for the current in-flight request
     pub cancel_token: Option<tokio_util::sync::CancellationToken>,
 
+    /// Active execution plan (if in plan mode)
+    pub active_plan: Option<crate::plan::Plan>,
+
     /// Files modified this session (path → diff string)
     pub modified_files: Vec<FileDiff>,
 
@@ -258,6 +261,7 @@ impl App {
             request_started: None,
             last_duration: None,
             cancel_token: None,
+            active_plan: None,
             modified_files: Vec::new(),
             diff_selected: 0,
             show_diff_panel: false,
