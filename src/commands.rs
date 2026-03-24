@@ -1,10 +1,14 @@
-// Updated commands.rs with /export and /watch implementations
+// Updated commands.rs with /export and /watch implementations and new /login and /config commands
 use crate::app::{App, Role, AppMode};
 use crate::tools::{files, tasks as task_tools};
 use crate::session;
+use crate::config::Config;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
+use std::fs;
+use std::io::Write;
+use std::env;
 
 /// Result of processing user input
 pub enum InputAction {
@@ -386,7 +390,6 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
                         md.push_str(&format!("<details><summary>Tool output</summary>\n\n{}\n\n</details>\n\n", msg.content));
                     }
                     Role::System => {
-                        // System messages are kept for context; include as blockquote
                         md.push_str(&format!("> {}\n\n", msg.content.replace('\n', "\n> ")));
                     }
                 }
@@ -400,7 +403,7 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             }
             // Write to a temporary markdown file in workspace
             let out_path = "session_export.md";
-            let write_res = std::fs::write(out_path, md);
+            let write_res = fs::write(out_path, md);
             match write_res {
                 Ok(_) => app.conversation.push_message(Role::System, format!("✅ Exported session to `{}`", out_path)),
                 Err(e) => app.conversation.push_message(Role::System, format!("❌ Failed to write export: {e}")),
@@ -593,6 +596,106 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             }
             InputAction::Handled
         }
+        // New command: /login – store API key and optional Honcho config
+        "/login" => {
+            // Expected: /login <api_key> [base_url] [app_id] [user_id]
+            let mut args_iter = args.split_whitespace();
+            let api_key = match args_iter.next() {
+                Some(k) => k,
+                None => {
+                    app.conversation.push_message(Role::System, "Usage: /login <api_key> [base_url] [app_id] [user_id]".to_string());
+                    return InputAction::Handled;
+                }
+            };
+            let base_url = args_iter.next();
+            let app_id = args_iter.next();
+            let user_id = args_iter.next();
+
+            // Load existing config or start fresh
+            let config_path = app.workspace.join(".openmerc.toml");
+            let mut config: toml::Value = if config_path.exists() {
+                let content = fs::read_to_string(&config_path).unwrap_or_default();
+                toml::from_str(&content).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()))
+            } else {
+                toml::Value::Table(toml::map::Map::new())
+            };
+
+            // Ensure [mercury] table exists and set fields
+            {
+                let mer_tbl = config.get_mut("mercury").and_then(|v| v.as_table_mut());
+                let mer_tbl = match mer_tbl {
+                    Some(t) => t,
+                    None => {
+                        config.as_table_mut().unwrap().insert("mercury".to_string(), toml::Value::Table(toml::map::Map::new()));
+                        config.get_mut("mercury").unwrap().as_table_mut().unwrap()
+                    }
+                };
+                mer_tbl.insert("api_key".to_string(), toml::Value::String(api_key.to_string()));
+                if let Some(url) = base_url {
+                    mer_tbl.insert("base_url".to_string(), toml::Value::String(url.to_string()));
+                }
+            }
+
+            // Optional Honcho config
+            if app_id.is_some() || user_id.is_some() {
+                {
+                    let hon_tbl = config.get_mut("honcho").and_then(|v| v.as_table_mut());
+                    let hon_tbl = match hon_tbl {
+                        Some(t) => t,
+                        None => {
+                            config.as_table_mut().unwrap().insert("honcho".to_string(), toml::Value::Table(toml::map::Map::new()));
+                            config.get_mut("honcho").unwrap().as_table_mut().unwrap()
+                        }
+                    };
+                    if let Some(id) = app_id {
+                        hon_tbl.insert("app_id".to_string(), toml::Value::String(id.to_string()));
+                    }
+                    if let Some(uid) = user_id {
+                        hon_tbl.insert("user_id".to_string(), toml::Value::String(uid.to_string()));
+                    }
+                    hon_tbl.insert("enabled".to_string(), toml::Value::Boolean(true));
+                }
+            }
+
+            // Write back to file
+            let new_toml = toml::to_string_pretty(&config).unwrap_or_default();
+            let write_res = fs::write(&config_path, new_toml);
+            match write_res {
+                Ok(_) => {
+                    // Optionally set env var for current process (not required)
+                    // env::set_var("INCEPTION_API_KEY", api_key);
+                    app.conversation.push_message(Role::System, "✅ Login info saved to .openmerc.toml".to_string());
+                }
+                Err(e) => {
+                    app.conversation.push_message(Role::System, format!("❌ Failed to write config: {e}"));
+                }
+            }
+            InputAction::Handled
+        }
+        // New command: /config – show current config (redact api key)
+        "/config" => {
+            let cfg = match Config::load(&app.workspace) {
+                Ok(c) => c,
+                Err(e) => {
+                    app.conversation.push_message(Role::System, format!("Error loading config: {e}"));
+                    return InputAction::Handled;
+                }
+            };
+            let api_key_redacted = if cfg.mercury.api_key.len() > 4 {
+                let len = cfg.mercury.api_key.len();
+                let last4 = &cfg.mercury.api_key[len - 4..];
+                format!("*****{}", last4)
+            } else {
+                "*****".to_string()
+            };
+            let mut out = String::new();
+            out.push_str("## Current configuration\n\n");
+            out.push_str(&format!("[mercury]\nbase_url = \"{}\"\napi_key = \"{}\"\nmodel = \"{}\"\nmax_tokens = {}\n\n", cfg.mercury.base_url, api_key_redacted, cfg.mercury.model, cfg.mercury.max_tokens));
+            out.push_str(&format!("[honcho]\nenabled = {}\nbase_url = \"{}\"\napp_id = \"{}\"\nuser_id = \"{}\"\nassistant_name = \"{}\"\nworkspace_id = \"{}\"\n\n", cfg.honcho.enabled, cfg.honcho.base_url, cfg.honcho.app_id, cfg.honcho.user_id, cfg.honcho.assistant_name, cfg.honcho.workspace_id));
+            out.push_str(&format!("[agent]\nname = \"{}\"\nsystem_prompt = \"...\"\n\n", cfg.agent.name));
+            app.conversation.push_message(Role::System, out);
+            InputAction::Handled
+        }
         _ => {
             app.conversation.push_message(Role::System, format!("Unknown command: {cmd}. Type /help for available commands."));
             InputAction::Handled
@@ -626,6 +729,8 @@ const HELP_TEXT: &str = r#"## Commands
 /test             — Run cargo test and show results
 /history          — Show recent git commits (last 10)
 /improve         — Self‑analysis with Semfora, auto‑create improvement tasks
+/login <api_key> [base_url] [app_id] [user_id] — Store credentials in .openmerc.toml
+/config           — Show current config (api key redacted)
 
 ## Mentions
 @path/to/file      — Attach file contents to your message
