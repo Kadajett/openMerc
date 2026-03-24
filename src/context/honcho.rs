@@ -64,7 +64,8 @@ impl HonchoContext {
     pub async fn start_session(&mut self) -> Result<()> {
         if !self.enabled || !self.reachable { return Ok(()); }
 
-        let url = format!("{}/sessions", self.ws_url());
+        // Create session under merc's peer so messages are peer-scoped
+        let url = format!("{}/peers/{}/sessions", self.ws_url(), self.assistant_name);
         logger::log("HONCHO", &format!("POST {url}"));
 
         let session_id = uuid::Uuid::new_v4().to_string();
@@ -225,19 +226,42 @@ impl HonchoContext {
     pub async fn get_session_context(&self) -> Option<String> {
         if !self.enabled || !self.reachable { return None; }
 
-        // Use workspace search — it works reliably with v3 API
-        let url = format!("{}/search", self.ws_url());
+        // Search scoped to merc's peer — only returns Merc's own conversations
+        let url = format!("{}/peers/{}/search", self.ws_url(), self.assistant_name);
+        logger::log("HONCHO", &format!("peer search: {url}"));
+
         let resp = self.client.post(&url)
-            .json(&serde_json::json!({ "query": "what is happening in this coding session" }))
+            .json(&serde_json::json!({ "query": "openMerc coding session progress" }))
             .send().await.ok()?;
 
         if resp.status().is_success() {
             let body: serde_json::Value = resp.json().await.ok()?;
             let results = format_search_results(&body);
-            logger::log("HONCHO", &format!("session_context got {} chars", results.len()));
+            logger::log("HONCHO", &format!("peer search got {} chars", results.len()));
             if results.is_empty() { None } else { Some(results) }
         } else {
-            None
+            // Fallback to workspace search filtered by peer
+            let url = format!("{}/search", self.ws_url());
+            let resp = self.client.post(&url)
+                .json(&serde_json::json!({ "query": "openMerc merc coding agent" }))
+                .send().await.ok()?;
+            if resp.status().is_success() {
+                let body: serde_json::Value = resp.json().await.ok()?;
+                // Filter results to only merc's peer
+                if let Some(arr) = body.as_array() {
+                    let filtered: Vec<&serde_json::Value> = arr.iter()
+                        .filter(|r| r["peer_id"].as_str() == Some(&self.assistant_name))
+                        .collect();
+                    if filtered.is_empty() { return None; }
+                    let results: Vec<String> = filtered.iter().take(5)
+                        .filter_map(|r| r["content"].as_str().map(|c| {
+                            let t = crate::logger::safe_truncate(c, 200);
+                            t.to_string()
+                        }))
+                        .collect();
+                    if results.is_empty() { None } else { Some(results.join("\n\n")) }
+                } else { None }
+            } else { None }
         }
     }
 

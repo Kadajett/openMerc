@@ -121,6 +121,7 @@ fn draw_log_tab(f: &mut Frame, app: &App, area: Rect) {
     };
     let log_view = Paragraph::new(lines)
         .block(Block::default().title(" Honcho Summaries ").borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)))
+        .wrap(ratatui::widgets::Wrap { trim: false })
         .scroll((scroll, 0));
     f.render_widget(log_view, area);
 }
