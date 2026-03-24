@@ -376,10 +376,19 @@ impl MercuryClient {
             && !last_user_msg.contains("analyze");
 
         if is_simple_chat {
-            // Direct chat — no tools, just diffusion response
+            // Direct chat — strip tool instructions from system prompt, no tools
+            let mut simple_messages = chat_messages.clone();
+            if let Some(sys_msg) = simple_messages.first_mut() {
+                if sys_msg.role == "system" {
+                    // Replace with a minimal system prompt for chat mode
+                    sys_msg.content = Some(
+                        "You are Merc — a fast, sharp coding assistant. Respond naturally and concisely. No tool calls.".to_string()
+                    );
+                }
+            }
             let chat_req = ChatRequest {
                 model: self.model.clone(),
-                messages: chat_messages.clone(),
+                messages: simple_messages,
                 stream: true,
                 max_tokens: Some(self.max_tokens),
                 tools: None,
@@ -391,10 +400,16 @@ impl MercuryClient {
                     let _ = event_tx.send(AppEvent::StreamDone);
                 }
                 _ => {
-                    // Fallback non-streaming
+                    // Fallback non-streaming (also use simple prompt)
+                    let mut fb_messages = chat_messages.clone();
+                    if let Some(sys_msg) = fb_messages.first_mut() {
+                        if sys_msg.role == "system" {
+                            sys_msg.content = Some("You are Merc — a fast, sharp coding assistant. Respond naturally. No tool calls.".to_string());
+                        }
+                    }
                     let fallback = ChatRequest {
                         model: self.model.clone(),
-                        messages: chat_messages.clone(),
+                        messages: fb_messages,
                         stream: false,
                         max_tokens: Some(self.max_tokens),
                         tools: None,
