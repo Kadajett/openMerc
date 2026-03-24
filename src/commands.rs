@@ -696,6 +696,84 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             app.conversation.push_message(Role::System, out);
             InputAction::Handled
         }
+        // New command: /snippet – save and load code snippets
+        "/snippet" => {
+            // Expected: /snippet save <name> <code>  OR  /snippet load <name>
+            let mut args_iter = args.split_whitespace();
+            let sub = args_iter.next();
+            match sub {
+                Some("save") => {
+                    if let Some(name) = args_iter.next() {
+                        // The rest of the args is the code (may be empty)
+                        let code: String = args_iter.collect::<Vec<&str>>().join(" ");
+                        let snippets_dir = app.workspace.join(".openmerc/snippets");
+                        let _ = fs::create_dir_all(&snippets_dir);
+                        let file_path = snippets_dir.join(format!("{}.rs", name));
+                        match fs::write(&file_path, code) {
+                            Ok(_) => app.conversation.push_message(Role::System, format!("✅ Snippet '{}' saved.", name)),
+                            Err(e) => app.conversation.push_message(Role::System, format!("❌ Failed to save snippet: {e}")),
+                        }
+                    } else {
+                        app.conversation.push_message(Role::System, "Usage: /snippet save <name> <code>".to_string());
+                    }
+                }
+                Some("load") => {
+                    if let Some(name) = args_iter.next() {
+                        let file_path = app.workspace.join(format!(".openmerc/snippets/{}.rs", name));
+                        match fs::read_to_string(&file_path) {
+                            Ok(content) => {
+                                app.conversation.push_message(Role::System, format!("## Snippet: {name}\n```rust\n{content}\n```"));
+                            }
+                            Err(e) => app.conversation.push_message(Role::System, format!("❌ Could not load snippet: {e}")),
+                        }
+                    } else {
+                        app.conversation.push_message(Role::System, "Usage: /snippet load <name>".to_string());
+                    }
+                }
+                _ => {
+                    app.conversation.push_message(Role::System, "Usage: /snippet <save|load> <name> [code]".to_string());
+                }
+            }
+            InputAction::Handled
+        }
+        // New command: /context – show Honcho memory conclusions and peer context
+        "/context" => {
+            // For simplicity, read memory_dump.md and display its content trimmed
+            let mem_path = app.workspace.join("memory_dump.md");
+            if mem_path.exists() {
+                match fs::read_to_string(&mem_path) {
+                    Ok(content) => {
+                        let display = if content.len() > 2000 {
+                            format!("{}...\n(truncated)", &content[..2000])
+                        } else {
+                            content
+                        };
+                        app.conversation.push_message(Role::System, format!("## Honcho context\n\n{}", display));
+                    }
+                    Err(e) => app.conversation.push_message(Role::System, format!("❌ Failed to read memory: {e}")),
+                }
+            } else {
+                app.conversation.push_message(Role::System, "❌ No memory_dump.md found in workspace.".to_string());
+            }
+            InputAction::Handled
+        }
+        // New command: /todo – alias for /tasks and inline add
+        "/todo" => {
+            if args.is_empty() {
+                // Show tasks (same as /tasks)
+                let output = task_tools::list_tasks(&app.tasks);
+                app.conversation.push_message(Role::System, format!("## Tasks\n{output}"));
+            } else {
+                // Create a task with the given title (args)
+                let title = args.trim();
+                let msg = task_tools::create_task(&mut app.tasks, title, None);
+                app.conversation.push_message(Role::System, msg);
+                // Auto‑commit the new todo file (if any changes)
+                let _ = Command::new("git").arg("add").arg(".").current_dir(&app.workspace).status();
+                let _ = Command::new("git").arg("commit").arg("-m").arg(format!("Add todo: {}", title)).current_dir(&app.workspace).status();
+            }
+            InputAction::Handled
+        }
         _ => {
             app.conversation.push_message(Role::System, format!("Unknown command: {cmd}. Type /help for available commands."));
             InputAction::Handled
@@ -731,6 +809,9 @@ const HELP_TEXT: &str = r#"## Commands
 /improve         — Self‑analysis with Semfora, auto‑create improvement tasks
 /login <api_key> [base_url] [app_id] [user_id] — Store credentials in .openmerc.toml
 /config           — Show current config (api key redacted)
+/snippet <save|load> <name> [code] — Save or load code snippets
+/context          — Show Honcho context (memory dump)
+/todo [text]      — List tasks or add inline todo (auto‑commit)
 
 ## Mentions
 @path/to/file      — Attach file contents to your message
@@ -740,5 +821,5 @@ const HELP_TEXT: &str = r#"## Commands
 Ctrl+C             — Quit (or cancel in‑progress operation)
 Ctrl+Q             — Always quit
 Esc                — Switch to chat scroll mode
-i / Enter          — Switch to input mode
+Enter / i          — Switch to input mode
 ↑↓ / j/k           — Scroll chat"#;
