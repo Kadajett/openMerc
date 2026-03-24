@@ -152,7 +152,9 @@ Rules:
 - When editing src/ files, use semantic_read_file first to understand the structure, then read_symbol for the specific function. Write the COMPLETE file content — do not omit fields or functions.
 - If cargo check fails, read the error, fix it, and try again.
 - ALWAYS use write_file tool to create files. NEVER just describe code in your response — write it to disk.
-- Respond naturally to conversational messages. Only check tasks when the user asks about work or gives you a task.
+- Respond naturally to conversational messages. Chat like a person.
+- Do NOT call list_tasks or create_task unless the user explicitly asks you to manage tasks or gives you multi-step work.
+- For simple questions or greetings, just respond directly without using any tools.
 - When working on tasks, keep going through them. Auto-commit with git when you finish a batch.
 - After modifying src/ files, tell the user a restart is needed to pick up changes."#;
 
