@@ -534,7 +534,7 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             }
             InputAction::Handled
         }
-        // New command: /history – show recent git commits
+        // New command: /history — show recent git commits
         "/history" => {
             let out = Command::new("git")
                 .arg("log")
@@ -549,6 +549,46 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
                 }
                 Err(e) => {
                     app.conversation.push_message(Role::System, format!("Error getting git history: {e}"));
+                }
+            }
+            InputAction::Handled
+        }
+        // New command: /improve – self‑analysis and auto‑task generation
+        "/improve" => {
+            // Run semfora analysis on the whole workspace
+            let result = Command::new("semfora-engine")
+                .arg("analyze")
+                .arg(".")
+                .output();
+            match result {
+                Ok(out) => {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    let mut created = 0;
+                    for line in stdout.lines() {
+                        if line.contains("complexity") {
+                            if let Some(num_str) = line.split(':').nth(1) {
+                                if let Ok(num) = num_str.trim().parse::<u32>() {
+                                    if num > 10 {
+                                        let title = format!("Refactor high‑complexity code ({} )", num);
+                                        let desc = format!("Semfora reported high complexity: {}", line.trim());
+                                        let _ = task_tools::create_task(&mut app.tasks, &title, Some(&desc));
+                                        created += 1;
+                                    }
+                                }
+                            }
+                        }
+                        if line.contains("risk") && line.to_lowercase().contains("high") {
+                            let title = "Address high‑risk code".to_string();
+                            let desc = format!("Semfora flagged a high‑risk area: {}", line.trim());
+                            let _ = task_tools::create_task(&mut app.tasks, &title, Some(&desc));
+                            created += 1;
+                        }
+                    }
+                    let summary = format!("/improve generated {} improvement task(s). Use /tasks to view them.", created);
+                    app.conversation.push_message(Role::System, summary);
+                }
+                Err(e) => {
+                    app.conversation.push_message(Role::System, format!("Error running semfora analyze: {e}"));
                 }
             }
             InputAction::Handled
@@ -585,13 +625,14 @@ const HELP_TEXT: &str = r#"## Commands
 /pr <title>       — Create a PR branch and open PR via gh
 /test             — Run cargo test and show results
 /history          — Show recent git commits (last 10)
+/improve         — Self‑analysis with Semfora, auto‑create improvement tasks
 
 ## Mentions
 @path/to/file      — Attach file contents to your message
 ^keyword           — Pull related Honcho memory into context
 
 ## Shortcuts
-Ctrl+C             — Quit (or cancel in-progress operation)
+Ctrl+C             — Quit (or cancel in‑progress operation)
 Ctrl+Q             — Always quit
 Esc                — Switch to chat scroll mode
 i / Enter          — Switch to input mode
