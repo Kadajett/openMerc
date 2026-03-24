@@ -348,88 +348,65 @@ impl MercuryClient {
         };
         let mut chat_messages = self.build_messages(system_context, session_summary.as_deref(), messages);
 
-        // Router: check if the last user message is a simple chat or needs tools
+        // Router: use Mercury structured output to decide chat vs tools
         let last_user_msg = messages.iter().rev()
             .find(|m| m.role == crate::app::Role::User)
-            .map(|m| m.content.to_lowercase())
+            .map(|m| m.content.clone())
             .unwrap_or_default();
 
-        // Simple heuristic: short messages without action words go straight to chat
-        let is_simple_chat = last_user_msg.len() < 100
-            && !last_user_msg.contains("create")
-            && !last_user_msg.contains("write")
-            && !last_user_msg.contains("read")
-            && !last_user_msg.contains("fix")
-            && !last_user_msg.contains("build")
-            && !last_user_msg.contains("run")
-            && !last_user_msg.contains("search")
-            && !last_user_msg.contains("task")
-            && !last_user_msg.contains("file")
-            && !last_user_msg.contains("code")
-            && !last_user_msg.contains("src/")
-            && !last_user_msg.contains("improve")
-            && !last_user_msg.contains("update")
-            && !last_user_msg.contains("add")
-            && !last_user_msg.contains("delete")
-            && !last_user_msg.contains("test")
-            && !last_user_msg.contains("commit")
-            && !last_user_msg.contains("analyze");
+        let router_messages = vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: Some("You are a router. Respond ONLY with JSON. If the user wants to READ files, WRITE files, RUN commands, SEARCH code, CREATE tasks, or do ANY coding work: {\"needs_tools\": true, \"response\": \"\"}. If the user is just chatting, asking questions, or greeting: {\"needs_tools\": false, \"response\": \"your reply\"}".to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: Some(last_user_msg),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+        ];
 
-        if is_simple_chat {
-            // Direct chat — strip tool instructions from system prompt, no tools
-            let mut simple_messages = chat_messages.clone();
-            if let Some(sys_msg) = simple_messages.first_mut() {
-                if sys_msg.role == "system" {
-                    // Replace with a minimal system prompt for chat mode
-                    sys_msg.content = Some(
-                        "You are Merc — a fast, sharp coding assistant. Respond naturally and concisely. No tool calls.".to_string()
-                    );
+        let router_req = ChatRequest {
+            model: self.model.clone(),
+            messages: router_messages,
+            stream: false,
+            max_tokens: Some(300),
+            tools: None,
+            diffusing: false,
+        };
+
+        let is_chat = match self.call_api(&router_req).await {
+            Ok(resp) => {
+                if let Some(usage) = &resp.usage {
+                    let _ = event_tx.send(AppEvent::TokensUsed(usage.total_tokens, usage.prompt_tokens, usage.completion_tokens));
                 }
+                if let Some(content) = resp.choices.first().and_then(|c| c.message.content.as_ref()) {
+                    // Try to parse the JSON response
+                    if let Some(start) = content.find('{') {
+                        if let Some(end) = content.rfind('}') {
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content[start..=end]) {
+                                let needs_tools = v["needs_tools"].as_bool().unwrap_or(true);
+                                if !needs_tools {
+                                    let response = v["response"].as_str().unwrap_or("").to_string();
+                                    if !response.is_empty() {
+                                        let _ = event_tx.send(AppEvent::DiffusionUpdate(response));
+                                        let _ = event_tx.send(AppEvent::StreamDone);
+                                        return;
+                                    }
+                                }
+                                !needs_tools
+                            } else { false }
+                        } else { false }
+                    } else { false }
+                } else { false }
             }
-            let chat_req = ChatRequest {
-                model: self.model.clone(),
-                messages: simple_messages,
-                stream: true,
-                max_tokens: Some(self.max_tokens),
-                tools: None,
-                diffusing: true,
-            };
-            match self.call_api_diffusing(&chat_req, &event_tx).await {
-                Ok(content) if !content.is_empty() => {
-                    let _ = event_tx.send(AppEvent::DiffusionUpdate(content));
-                    let _ = event_tx.send(AppEvent::StreamDone);
-                }
-                _ => {
-                    // Fallback non-streaming (also use simple prompt)
-                    let mut fb_messages = chat_messages.clone();
-                    if let Some(sys_msg) = fb_messages.first_mut() {
-                        if sys_msg.role == "system" {
-                            sys_msg.content = Some("You are Merc — a fast, sharp coding assistant. Respond naturally. No tool calls.".to_string());
-                        }
-                    }
-                    let fallback = ChatRequest {
-                        model: self.model.clone(),
-                        messages: fb_messages,
-                        stream: false,
-                        max_tokens: Some(self.max_tokens),
-                        tools: None,
-                        diffusing: false,
-                    };
-                    if let Ok(resp) = self.call_api(&fallback).await {
-                        if let Some(usage) = &resp.usage {
-                            let _ = event_tx.send(AppEvent::TokensUsed(usage.total_tokens, usage.prompt_tokens, usage.completion_tokens));
-                        }
-                        let content = resp.choices.first()
-                            .and_then(|c| c.message.content.as_ref())
-                            .cloned()
-                            .unwrap_or_else(|| "...".to_string());
-                        let _ = event_tx.send(AppEvent::DiffusionUpdate(content));
-                        let _ = event_tx.send(AppEvent::StreamDone);
-                    }
-                }
-            }
-            return;
-        }
+            Err(_) => false,
+        };
+
+        if is_chat { return; } // Already sent the response above
 
         // Tool-calling mode — full tool loop
         let tools = registry::tool_definitions();
