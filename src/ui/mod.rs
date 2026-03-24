@@ -1,4 +1,5 @@
 mod chat;
+mod diff_panel;
 mod input;
 mod layout;
 pub mod render;

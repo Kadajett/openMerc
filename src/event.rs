@@ -27,6 +27,8 @@ pub enum AppEvent {
     AgentProgress(u32, u32, String),
     /// Tasks were updated (synced from async tool context)
     TaskUpdated(Vec<crate::app::Task>),
+    /// A file was modified (path, diff)
+    FileModified(String, String),
     /// Tick for UI refresh
     Tick,
 }

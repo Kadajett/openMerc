@@ -177,6 +177,26 @@ pub struct App {
 
     /// Cancellation token for the current in-flight request
     pub cancel_token: Option<tokio_util::sync::CancellationToken>,
+
+    /// Files modified this session (path → diff string)
+    pub modified_files: Vec<FileDiff>,
+
+    /// Which modified file is selected in the diff panel
+    pub diff_selected: usize,
+
+    /// Whether the diff panel is visible
+    pub show_diff_panel: bool,
+
+    /// Diff panel scroll offset
+    pub diff_scroll: u16,
+}
+
+/// A tracked file modification
+#[derive(Debug, Clone)]
+pub struct FileDiff {
+    pub path: String,
+    pub diff: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
 /// A single tool call log entry
@@ -213,6 +233,10 @@ impl App {
             request_started: None,
             last_duration: None,
             cancel_token: None,
+            modified_files: Vec::new(),
+            diff_selected: 0,
+            show_diff_panel: false,
+            diff_scroll: 0,
         }
     }
 

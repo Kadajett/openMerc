@@ -290,6 +290,11 @@ impl MercuryClient {
                     };
                     logger::log_tool(&tc.function.name, &tc.function.arguments, &result);
                     let _ = tx.send(AppEvent::ToolResult(tc.function.name.clone(), result.clone()));
+                    // Sync tasks back to UI after task tool calls
+                    if tc.function.name.starts_with("create_task") || tc.function.name.starts_with("update_task") {
+                        let tasks = tool_ctx.tasks.lock().await.clone();
+                        let _ = tx.send(AppEvent::TaskUpdated(tasks));
+                    }
                     msgs.push(ChatMessage {
                         role: "tool".to_string(),
                         content: Some(result),

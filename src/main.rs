@@ -354,6 +354,17 @@ async fn main() -> Result<()> {
                     });
                 }
                 AppEvent::ToolResult(name, result) => {
+                    // Track file modifications for the diff panel
+                    if name == "write_file" {
+                        // Extract path from the last ToolUse args
+                        if let Some(entry) = app.pending_tools.iter().rev().find(|t| t.name == "write_file") {
+                            let path = entry.args_summary.split(',').next().unwrap_or("?").trim().to_string();
+                            if !result.contains("REVERTED") && !result.contains("Error") {
+                                let _ = event_tx.send(AppEvent::FileModified(path, result.clone()));
+                            }
+                        }
+                    }
+
                     // Attach result to the last matching tool entry
                     if let Some(entry) = app.pending_tools.iter_mut().rev()
                         .find(|t| t.name == name && t.result.is_none())
@@ -382,6 +393,22 @@ async fn main() -> Result<()> {
                 }
                 AppEvent::TaskUpdated(tasks) => {
                     app.tasks = tasks;
+                }
+                AppEvent::FileModified(path, diff) => {
+                    // Auto-show diff panel when files are modified
+                    app.show_diff_panel = true;
+                    // Update or add the file diff
+                    if let Some(existing) = app.modified_files.iter_mut().find(|f| f.path == path) {
+                        existing.diff = diff;
+                        existing.timestamp = chrono::Utc::now();
+                    } else {
+                        app.modified_files.push(app::FileDiff {
+                            path,
+                            diff,
+                            timestamp: chrono::Utc::now(),
+                        });
+                    }
+                    app.diff_selected = app.modified_files.len().saturating_sub(1);
                 }
                 AppEvent::Resize(_, _) | AppEvent::Tick => {}
             }
@@ -431,6 +458,12 @@ fn handle_key(
         } else {
             app.should_quit = true;
         }
+        return;
+    }
+
+    // Ctrl+D: toggle diff panel
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('d') {
+        app.show_diff_panel = !app.show_diff_panel;
         return;
     }
 

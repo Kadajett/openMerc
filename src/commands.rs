@@ -43,13 +43,13 @@ pub fn process_input(app: &mut App, raw_input: &str) -> InputAction {
                     injected.push(format!("## File: {file_path}\n```\n{truncated}\n```"));
                     app.conversation.push_message(
                         Role::System,
-                        format!("📎 attached {file_path} ({lines} lines)"),
+                        format!("📎 attached {file_path} ({lines} lines)")
                     );
                 }
                 Err(e) => {
                     app.conversation.push_message(
                         Role::System,
-                        format!("⚠ @{file_path}: {e}"),
+                        format!("⚠ @{file_path}: {e}")
                     );
                 }
             }
@@ -123,6 +123,12 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             app.conversation.push_message(Role::System, "Chat cleared. Session preserved.".to_string());
             InputAction::Handled
         }
+        "/diff" | "/changes" => {
+            app.show_diff_panel = !app.show_diff_panel;
+            let state = if app.show_diff_panel { "shown" } else { "hidden" };
+            app.conversation.push_message(Role::System, format!("Diff panel {state}. {} files modified.", app.modified_files.len()));
+            InputAction::Handled
+        }
         "/model" => {
             if args.is_empty() {
                 app.conversation.push_message(Role::System, "Usage: /model <model-name>\nAvailable: mercury-2, mercury-edit".to_string());
@@ -173,6 +179,28 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
                     message: String::new(),
                     injected_context: vec![format!("__THOUGHT_QUERY__:{args}")],
                 };
+            }
+            InputAction::Handled
+        }
+        "/plan" => {
+            if args.is_empty() {
+                app.conversation.push_message(Role::System, "Usage: /plan <title> [description]".to_string());
+            } else {
+                let mut split = args.splitn(2, ' ');
+                let title = split.next().unwrap();
+                let description = split.next();
+                let msg = task_tools::create_task(&mut app.tasks, title, description);
+                app.conversation.push_message(Role::System, msg);
+            }
+            InputAction::Handled
+        }
+        "/approve" => {
+            if args.is_empty() {
+                app.conversation.push_message(Role::System, "Usage: /approve <task-id>".to_string());
+            } else {
+                let id = args.trim();
+                let msg = task_tools::update_task(&mut app.tasks, id, Some("completed"), None, None);
+                app.conversation.push_message(Role::System, msg);
             }
             InputAction::Handled
         }
