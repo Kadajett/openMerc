@@ -117,11 +117,27 @@ impl MercuryClient {
                 tool_call_id: None,
             });
         }
-        for msg in messages {
-            match msg.role {
-                crate::app::Role::Tool | crate::app::Role::System => continue,
-                _ => {}
-            }
+
+        // Filter to only user/assistant messages
+        let relevant: Vec<&Message> = messages.iter()
+            .filter(|m| !matches!(m.role, crate::app::Role::Tool | crate::app::Role::System))
+            .collect();
+
+        // Rolling window: keep last 30 messages to stay within Mercury's context
+        let max_history = 30;
+        let start = if relevant.len() > max_history { relevant.len() - max_history } else { 0 };
+
+        if start > 0 {
+            // Inject a summary note so Mercury knows there's prior context
+            out.push(ChatMessage {
+                role: "system".to_string(),
+                content: Some(format!("(Note: {} earlier messages were trimmed to fit context. The conversation started before what you see here.)", start)),
+                tool_calls: None,
+                tool_call_id: None,
+            });
+        }
+
+        for msg in &relevant[start..] {
             out.push(ChatMessage {
                 role: msg.role.to_string(),
                 content: Some(msg.content.clone()),
@@ -207,6 +223,32 @@ impl MercuryClient {
             if cancel.is_cancelled() {
                 return Ok(Some("(operation cancelled)".to_string()));
             }
+
+            // Compact tool history: if msgs is getting large, summarize old tool results
+            // Keep system prompt + last 40 messages, summarize the rest
+            if msgs.len() > 50 {
+                let system_msgs: Vec<ChatMessage> = msgs.iter()
+                    .take_while(|m| m.role == "system")
+                    .cloned()
+                    .collect();
+                let sys_count = system_msgs.len();
+                let tail: Vec<ChatMessage> = msgs[msgs.len().saturating_sub(40)..].to_vec();
+
+                let trimmed_count = msgs.len() - sys_count - tail.len();
+                let mut compacted = system_msgs;
+                if trimmed_count > 0 {
+                    compacted.push(ChatMessage {
+                        role: "system".to_string(),
+                        content: Some(format!("({trimmed_count} earlier tool call messages were summarized to save context. Focus on the recent messages below.)")),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    });
+                }
+                compacted.extend(tail);
+                *msgs = compacted;
+                logger::log("MERCURY", &format!("Compacted tool history: trimmed {trimmed_count} messages"));
+            }
+
             let req = ChatRequest {
                 model: self.model.clone(),
                 messages: msgs.clone(),
@@ -292,12 +334,34 @@ impl MercuryClient {
                     diffusing: true,
                 };
                 match self.call_api_diffusing(&diff_req, &event_tx).await {
-                    Ok(content) => {
+                    Ok(content) if !content.is_empty() => {
                         let _ = event_tx.send(AppEvent::DiffusionUpdate(content.clone()));
                         let _ = event_tx.send(AppEvent::StreamDone);
                     }
-                    Err(e) => {
-                        let _ = event_tx.send(AppEvent::Error(format!("{e}")));
+                    Ok(_) | Err(_) => {
+                        // Diffusion failed or returned empty — fallback to non-streaming
+                        logger::log("MERCURY", "Diffusion failed, falling back to non-streaming");
+                        let fallback_req = ChatRequest {
+                            model: self.model.clone(),
+                            messages: chat_messages.clone(),
+                            stream: false,
+                            max_tokens: Some(self.max_tokens),
+                            tools: None,
+                            diffusing: false,
+                        };
+                        match self.call_api(&fallback_req).await {
+                            Ok(resp) => {
+                                let content = resp.choices.first()
+                                    .and_then(|c| c.message.content.as_ref())
+                                    .cloned()
+                                    .unwrap_or_else(|| "(empty response)".to_string());
+                                let _ = event_tx.send(AppEvent::DiffusionUpdate(content));
+                                let _ = event_tx.send(AppEvent::StreamDone);
+                            }
+                            Err(e) => {
+                                let _ = event_tx.send(AppEvent::Error(format!("Both diffusion and fallback failed: {e}")));
+                            }
+                        }
                     }
                 }
             }
