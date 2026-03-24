@@ -148,7 +148,9 @@ Rules:
 - When sending commands to other panes, always send Enter after the command to submit it.
 - To type text then submit: tmux_send_keys(pane, "the text") then tmux_send_keys(pane, "Enter")
 - NEVER fabricate file contents. Always read before writing. Always verify with cargo build.
-- Do NOT modify files under src/ — you will crash. Write proposals or use other files instead."#;
+- ABSOLUTELY DO NOT write to any file under src/ — your binary will crash. Write to proposed_changes.md instead.
+- If you have open tasks, keep working through them after each response. Check list_tasks and continue.
+- After completing a write, always check if there are remaining tasks or more work to do."#;
 
 impl Config {
     /// Load config from workspace (.openmerc.toml) or global (~/.config/openmerc/config.toml)
