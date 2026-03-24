@@ -211,11 +211,34 @@ pub struct App {
     /// Which modified file is selected in the diff panel
     pub diff_selected: usize,
 
-    /// Whether the diff panel is visible
+    /// Whether the side panel is visible (always open by default)
     pub show_diff_panel: bool,
 
-    /// Diff panel scroll offset
+    /// Which tab is active in the side panel
+    pub side_tab: SideTab,
+
+    /// Per-tab scroll offsets
     pub diff_scroll: u16,
+    pub log_scroll: u16,
+    pub tasks_scroll: u16,
+
+    /// Running log of change summaries (from Honcho or auto-generated)
+    pub change_log: Vec<ChangeLogEntry>,
+}
+
+/// Which tab is active in the side panel
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SideTab {
+    Diff,
+    Log,
+    Tasks,
+}
+
+/// A summary entry in the change log
+#[derive(Debug, Clone)]
+pub struct ChangeLogEntry {
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub summary: String,
 }
 
 /// A tracked file modification
@@ -264,8 +287,12 @@ impl App {
             active_plan: None,
             modified_files: Vec::new(),
             diff_selected: 0,
-            show_diff_panel: false,
+            show_diff_panel: true,
+            side_tab: SideTab::Diff,
             diff_scroll: 0,
+            log_scroll: 0,
+            tasks_scroll: 0,
+            change_log: Vec::new(),
         }
     }
 

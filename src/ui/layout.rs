@@ -18,13 +18,13 @@ pub fn draw(f: &mut Frame, app: &App) {
         ])
         .split(f.area());
 
-    // If diff panel is visible and there are modified files, split horizontally
-    if app.show_diff_panel && !app.modified_files.is_empty() {
+    // Side panel always visible (Ctrl+D to toggle)
+    if app.show_diff_panel {
         let hsplit = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Percentage(55),  // chat
-                Constraint::Percentage(45),  // diff panel
+                Constraint::Percentage(45),  // side panel (tabbed)
             ])
             .split(main_chunks[0]);
 

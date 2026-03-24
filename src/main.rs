@@ -380,10 +380,31 @@ async fn main() -> Result<()> {
                         app.agent_progress = Some(app::AgentProgressInfo { round, max_rounds, current_action: action });
                     }
                     AppEvent::TaskUpdated(tasks) => {
+                        // Log newly completed tasks
+                        for new_task in &tasks {
+                            if new_task.status == app::TaskStatus::Completed {
+                                let was_not_done = app.tasks.iter()
+                                    .find(|t| t.id == new_task.id)
+                                    .map(|t| t.status != app::TaskStatus::Completed)
+                                    .unwrap_or(true);
+                                if was_not_done {
+                                    app.change_log.push(app::ChangeLogEntry {
+                                        timestamp: chrono::Utc::now(),
+                                        summary: format!("✓ Task completed: {}", new_task.title),
+                                    });
+                                }
+                            }
+                        }
                         app.tasks = tasks;
                     }
                     AppEvent::FileModified(path, diff) => {
-                        app.show_diff_panel = true;
+                        // Add to change log
+                        let lines_changed = diff.lines().filter(|l| l.starts_with('+') || l.starts_with('-')).count();
+                        app.change_log.push(app::ChangeLogEntry {
+                            timestamp: chrono::Utc::now(),
+                            summary: format!("Modified {} ({} lines changed)", path, lines_changed),
+                        });
+
                         if let Some(existing) = app.modified_files.iter_mut().find(|f| f.path == path) {
                             existing.diff = diff;
                             existing.timestamp = chrono::Utc::now();
@@ -438,6 +459,23 @@ fn handle_key(
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('d') {
         app.show_diff_panel = !app.show_diff_panel;
         return;
+    }
+    // Tab cycling: Ctrl+1/2/3 or Tab to switch side panel tabs
+    if key.code == KeyCode::Tab && !key.modifiers.contains(KeyModifiers::SHIFT) {
+        app.side_tab = match app.side_tab {
+            app::SideTab::Diff => app::SideTab::Log,
+            app::SideTab::Log => app::SideTab::Tasks,
+            app::SideTab::Tasks => app::SideTab::Diff,
+        };
+        return;
+    }
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('1') => { app.side_tab = app::SideTab::Diff; return; }
+            KeyCode::Char('2') => { app.side_tab = app::SideTab::Log; return; }
+            KeyCode::Char('3') => { app.side_tab = app::SideTab::Tasks; return; }
+            _ => {}
+        }
     }
     if key.code == KeyCode::Esc {
         app.focus = FocusPanel::Chat;
