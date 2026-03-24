@@ -109,6 +109,10 @@ pub enum AppMode {
     Normal,
     /// Session picker on launch
     SessionPicker,
+    /// Plan mode – executing a plan
+    Plan,
+    /// Paused mode – plan execution paused
+    Paused,
 }
 
 /// Agent progress during multi-step work

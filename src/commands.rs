@@ -1,4 +1,4 @@
-use crate::app::{App, Role};
+use crate::app::{App, Role, AppMode};
 use crate::tools::{files, tasks as task_tools};
 use crate::session;
 
@@ -118,6 +118,74 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             }
             InputAction::Handled
         }
+        "/rename" => {
+            // Alias for /title but also persist the change to the session index
+            if args.is_empty() {
+                app.conversation.push_message(Role::System, "Usage: /rename <new-title>".to_string());
+            } else {
+                app.conversation.title = args.to_string();
+                // Persist the updated title in the session index
+                let persisted = session::snapshot_from_app(app);
+                let _ = session::save_session(&app.workspace, &persisted);
+                app.conversation.push_message(Role::System, format!("Session renamed to: {args}"));
+            }
+            InputAction::Handled
+        }
+        "/branch" => {
+            // Show current git branch for the workspace
+            match session::git_branch(&app.workspace) {
+                Some(branch) => {
+                    app.conversation.push_message(Role::System, format!("Current git branch: {branch}"));
+                }
+                None => {
+                    app.conversation.push_message(Role::System, "Not a git repository or unable to determine branch.".to_string());
+                }
+            }
+            InputAction::Handled
+        }
+        "/commit" => {
+            // Commit changes in the workspace with a message
+            if args.is_empty() {
+                app.conversation.push_message(Role::System, "Usage: /commit <message>".to_string());
+            } else {
+                let msg = args.trim();
+                // Stage all changes
+                let add_status = std::process::Command::new("git")
+                    .arg("add")
+                    .arg(".")
+                    .current_dir(&app.workspace)
+                    .status();
+                match add_status {
+                    Ok(status) if status.success() => {
+                        let commit_output = std::process::Command::new("git")
+                            .arg("commit")
+                            .arg("-m")
+                            .arg(msg)
+                            .current_dir(&app.workspace)
+                            .output();
+                        match commit_output {
+                            Ok(out) => {
+                                let stdout = String::from_utf8_lossy(&out.stdout);
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                let response = if out.status.success() {
+                                    format!("Commit successful:\n{}", stdout)
+                                } else {
+                                    format!("Commit failed:\n{}", stderr)
+                                };
+                                app.conversation.push_message(Role::System, response);
+                            }
+                            Err(e) => {
+                                app.conversation.push_message(Role::System, format!("Error running git commit: {e}"));
+                            }
+                        }
+                    }
+                    _ => {
+                        app.conversation.push_message(Role::System, "git add failed".to_string());
+                    }
+                }
+            }
+            InputAction::Handled
+        }
         "/clear" => {
             app.conversation.messages.clear();
             app.conversation.push_message(Role::System, "Chat cleared. Session preserved.".to_string());
@@ -191,6 +259,8 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
                 let description = split.next();
                 let msg = task_tools::create_task(&mut app.tasks, title, description);
                 app.conversation.push_message(Role::System, msg);
+                // Force plan mode
+                app.app_mode = AppMode::Plan;
             }
             InputAction::Handled
         }
@@ -201,6 +271,8 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
                 let id = args.trim();
                 let msg = task_tools::update_task(&mut app.tasks, id, Some("completed"), None, None);
                 app.conversation.push_message(Role::System, msg);
+                // Return to normal mode after approval
+                app.app_mode = AppMode::Normal;
             }
             InputAction::Handled
         }
@@ -219,6 +291,9 @@ const HELP_TEXT: &str = r#"## Commands
 /tasks, /t         — List current tasks
 /sessions, /s      — List saved sessions
 /title <name>      — Set session title
+/rename <name>    — Rename session (persisted)
+/branch           — Show current git branch
+/commit <msg>     — Commit changes with message
 /clear             — Clear chat (session preserved)
 /files, /ls [path] — List directory
 /cat, /read <file> — Read a file
