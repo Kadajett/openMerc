@@ -108,7 +108,7 @@ impl MercuryClient {
         }
     }
 
-    fn build_messages(&self, system_context: Option<&str>, messages: &[Message]) -> Vec<ChatMessage> {
+    fn build_messages(&self, system_context: Option<&str>, summary: Option<&str>, messages: &[Message]) -> Vec<ChatMessage> {
         let mut out = Vec::new();
         if let Some(ctx) = system_context {
             out.push(ChatMessage {
@@ -118,16 +118,21 @@ impl MercuryClient {
                 tool_call_id: None,
             });
         }
-
+        if let Some(s) = summary {
+            out.push(ChatMessage {
+                role: "system".to_string(),
+                content: Some(s.to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+            });
+        }
         // Filter to only user/assistant messages
         let relevant: Vec<&Message> = messages.iter()
             .filter(|m| !matches!(m.role, crate::app::Role::Tool | crate::app::Role::System))
             .collect();
-
         // Keep last 20 user/assistant messages
         let max_history = 20;
         let start = if relevant.len() > max_history { relevant.len() - max_history } else { 0 };
-
         if start > 0 {
             // Placeholder: in production this would call Honcho get_session_context to obtain a compressed summary.
             out.push(ChatMessage {
@@ -137,7 +142,6 @@ impl MercuryClient {
                 tool_call_id: None,
             });
         }
-
         for msg in &relevant[start..] {
             out.push(ChatMessage {
                 role: msg.role.to_string(),
@@ -224,7 +228,6 @@ impl MercuryClient {
             if cancel.is_cancelled() {
                 return Ok(Some("(operation cancelled)".to_string()));
             }
-
             // Compact tool history: if msgs is getting large, summarize old tool results
             // Keep system prompt + last 40 messages, summarize the rest
             if msgs.len() > 50 {
@@ -234,7 +237,6 @@ impl MercuryClient {
                     .collect();
                 let sys_count = system_msgs.len();
                 let tail: Vec<ChatMessage> = msgs[msgs.len().saturating_sub(40)..].to_vec();
-
                 let trimmed_count = msgs.len() - sys_count - tail.len();
                 let mut compacted = system_msgs;
                 if trimmed_count > 0 {
@@ -249,7 +251,6 @@ impl MercuryClient {
                 *msgs = compacted;
                 logger::log("MERCURY", &format!("Compacted tool history: trimmed {trimmed_count} messages"));
             }
-
             let req = ChatRequest {
                 model: self.model.clone(),
                 messages: msgs.clone(),
@@ -291,7 +292,6 @@ impl MercuryClient {
                     };
                     logger::log_tool(&tc.function.name, &tc.function.arguments, &result);
                     let _ = tx.send(AppEvent::ToolResult(tc.function.name.clone(), result.clone()));
-                    // Sync tasks back to UI after task tool calls
                     if tc.function.name.starts_with("create_task") || tc.function.name.starts_with("update_task") {
                         let tasks = tool_ctx.tasks.lock().await.clone();
                         let _ = tx.send(AppEvent::TaskUpdated(tasks));
@@ -303,9 +303,8 @@ impl MercuryClient {
                         tool_call_id: tc.id.clone(),
                     });
                 }
-                continue; // next round
+                continue;
             }
-            // No tool calls – exit loop
             return Ok(None);
         }
         Ok(Some("(max tool rounds reached)".to_string()))
@@ -320,7 +319,12 @@ impl MercuryClient {
         event_tx: mpsc::UnboundedSender<AppEvent>,
         cancel: CancellationToken,
     ) {
-        let mut chat_messages = self.build_messages(system_context, messages);
+        // Retrieve optional Honcho session summary
+        let session_summary = {
+            let mut honcho = tool_ctx.honcho.lock().await;
+            honcho.get_session_context().await
+        };
+        let mut chat_messages = self.build_messages(system_context, session_summary.as_deref(), messages);
         let tools = registry::tool_definitions();
         let max_rounds = 50_u32;
         match self.run_tool_loop(&mut chat_messages, &tools, max_rounds, tool_ctx, &event_tx, &cancel).await {
@@ -330,7 +334,6 @@ impl MercuryClient {
                 return;
             }
             Ok(None) => {
-                // Diffusion phase
                 let diff_req = ChatRequest {
                     model: self.model.clone(),
                     messages: chat_messages.clone(),
@@ -345,7 +348,6 @@ impl MercuryClient {
                         let _ = event_tx.send(AppEvent::StreamDone);
                     }
                     Ok(_) | Err(_) => {
-                        // Diffusion failed or returned empty — fallback to non-streaming
                         logger::log("MERCURY", "Diffusion failed, falling back to non-streaming");
                         let fallback_req = ChatRequest {
                             model: self.model.clone(),

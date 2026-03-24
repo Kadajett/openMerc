@@ -220,6 +220,16 @@ impl HonchoContext {
         }
     }
 
+    /// Retrieve a brief summary of the current session, if available.
+    /// Currently implemented by querying conclusions with a generic "session summary" query.
+    pub async fn get_session_context(&self) -> Option<String> {
+        if !self.enabled || !self.reachable {
+            return None;
+        }
+        // Use a simple query to fetch any stored conclusions about the session.
+        self.query_conclusions("session summary").await
+    }
+
     // ---- Context Enrichment ----
 
     pub async fn enrich_system_prompt(&self, base_prompt: &str, user_query: &str) -> String {
