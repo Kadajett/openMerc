@@ -100,8 +100,13 @@ pub fn tmux_split(direction: &str, command: Option<&str>) -> String {
     }
 }
 
-/// Kill a tmux pane
+/// Kill a tmux pane. Refuses to kill the pane we're running in.
 pub fn tmux_kill_pane(pane_id: &str) -> String {
+    // Safety: don't kill our own pane
+    let our_pane = run_tmux(&["display-message", "-p", "#{pane_id}"]);
+    if our_pane.trim() == pane_id {
+        return format!("Refused to kill own pane {pane_id}. Use tmux_kill_pane on other panes only.");
+    }
     run_tmux(&["kill-pane", "-t", pane_id]);
     format!("Killed pane {pane_id}")
 }
@@ -124,19 +129,24 @@ pub fn spawn_agent(workspace: &Path, extra_env: &str) -> String {
         _ => {}
     }
 
-    // Spawn in a new horizontal split
-    let cmd = if extra_env.is_empty() {
-        format!(
-            "cd {} && INCEPTION_API_KEY=$INCEPTION_API_KEY cargo run 2>/dev/null",
-            workspace.display()
-        )
+    // Spawn in a new horizontal split, passing through API keys
+    let api_key = std::env::var("INCEPTION_API_KEY")
+        .or_else(|_| std::env::var("MERCURY_API_KEY"))
+        .unwrap_or_default();
+
+    let env_str = if !extra_env.is_empty() {
+        extra_env.to_string()
+    } else if !api_key.is_empty() {
+        format!("INCEPTION_API_KEY={api_key}")
     } else {
-        format!(
-            "cd {} && {} cargo run 2>/dev/null",
-            workspace.display(),
-            extra_env
-        )
+        String::new()
     };
+
+    let cmd = format!(
+        "cd {} && {} cargo run 2>/dev/null",
+        workspace.display(),
+        env_str
+    );
 
     let output = run_tmux(&[
         "split-window", "-h", "-P", "-F", "#{pane_id}",
