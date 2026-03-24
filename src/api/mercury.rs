@@ -326,7 +326,7 @@ impl MercuryClient {
         };
         let mut chat_messages = self.build_messages(system_context, session_summary.as_deref(), messages);
         let tools = registry::tool_definitions();
-        let max_rounds = 50_u32;
+        let max_rounds = 100_u32;
         match self.run_tool_loop(&mut chat_messages, &tools, max_rounds, tool_ctx, &event_tx, &cancel).await {
             Ok(Some(early)) => {
                 let _ = event_tx.send(AppEvent::DiffusionUpdate(early.clone()));
