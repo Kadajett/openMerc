@@ -572,12 +572,50 @@ fn handle_chat_key(app: &mut App, key: crossterm::event::KeyEvent) {
 }
 
 fn handle_mouse(app: &mut App, mouse: crossterm::event::MouseEvent) {
+    let (term_width, term_height) = crossterm::terminal::size().unwrap_or((80, 40));
+    let panel_start = if app.show_diff_panel { (term_width as f32 * 0.55) as u16 } else { term_width };
+    let in_side_panel = mouse.column >= panel_start;
+
     match mouse.kind {
-        MouseEventKind::ScrollUp => app.chat_scroll = app.chat_scroll.saturating_add(3),
-        MouseEventKind::ScrollDown => app.chat_scroll = app.chat_scroll.saturating_sub(3),
+        MouseEventKind::ScrollUp => {
+            if in_side_panel {
+                // Scroll the active side tab
+                match app.side_tab {
+                    app::SideTab::Diff => app.diff_scroll = app.diff_scroll.saturating_add(3),
+                    app::SideTab::Log => app.log_scroll = app.log_scroll.saturating_add(3),
+                    app::SideTab::Tasks => app.tasks_scroll = app.tasks_scroll.saturating_add(3),
+                }
+            } else {
+                app.chat_scroll = app.chat_scroll.saturating_add(3);
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if in_side_panel {
+                match app.side_tab {
+                    app::SideTab::Diff => app.diff_scroll = app.diff_scroll.saturating_sub(3),
+                    app::SideTab::Log => app.log_scroll = app.log_scroll.saturating_sub(3),
+                    app::SideTab::Tasks => app.tasks_scroll = app.tasks_scroll.saturating_sub(3),
+                }
+            } else {
+                app.chat_scroll = app.chat_scroll.saturating_sub(3);
+            }
+        }
         MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-            let term_height = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(40);
-            if mouse.row >= term_height.saturating_sub(4) { app.focus = FocusPanel::Input; } else { app.focus = FocusPanel::Chat; }
+            if mouse.row >= term_height.saturating_sub(4) {
+                app.focus = FocusPanel::Input;
+            } else if in_side_panel && mouse.row < 2 {
+                // Click on tab bar — detect which tab
+                let rel_x = mouse.column.saturating_sub(panel_start);
+                if rel_x < 7 {
+                    app.side_tab = app::SideTab::Diff;
+                } else if rel_x < 14 {
+                    app.side_tab = app::SideTab::Log;
+                } else {
+                    app.side_tab = app::SideTab::Tasks;
+                }
+            } else {
+                app.focus = FocusPanel::Chat;
+            }
         }
         _ => {}
     }
