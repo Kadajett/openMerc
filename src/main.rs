@@ -474,6 +474,14 @@ fn handle_key(
         }
     }
     if key.code == KeyCode::Esc {
+        if app.loading {
+            if let Some(token) = app.cancel_token.take() { token.cancel(); }
+            app.loading = false;
+            app.stream_buffer.clear();
+            app.agent_progress = None;
+            app.pending_tools.clear();
+            app.conversation.push_message(app::Role::System, "Cancelled.".to_string());
+        }
         app.focus = FocusPanel::Chat;
         return;
     }

@@ -223,11 +223,22 @@ impl HonchoContext {
     /// Retrieve a brief summary of the current session, if available.
     /// Currently implemented by querying conclusions with a generic "session summary" query.
     pub async fn get_session_context(&self) -> Option<String> {
-        if !self.enabled || !self.reachable {
-            return None;
+        if !self.enabled || !self.reachable { return None; }
+
+        // Use workspace search — it works reliably with v3 API
+        let url = format!("{}/search", self.ws_url());
+        let resp = self.client.post(&url)
+            .json(&serde_json::json!({ "query": "what is happening in this coding session" }))
+            .send().await.ok()?;
+
+        if resp.status().is_success() {
+            let body: serde_json::Value = resp.json().await.ok()?;
+            let results = format_search_results(&body);
+            logger::log("HONCHO", &format!("session_context got {} chars", results.len()));
+            if results.is_empty() { None } else { Some(results) }
+        } else {
+            None
         }
-        // Use a simple query to fetch any stored conclusions about the session.
-        self.query_conclusions("session summary").await
     }
 
     // ---- Context Enrichment ----

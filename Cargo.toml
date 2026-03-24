@@ -1,7 +1,10 @@
 [package]
 name = "openmerc"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+authors = ["Jeremy Stover <jeremy@example.com>"]
+description = "Open-source Mercury CLI tool"
+license = "MIT"
 
 [dependencies]
 # TUI
@@ -32,3 +35,9 @@ tokio-stream = "0.1"
 tokio-util = "0.7"
 toml = "0.8"
 syntect = "5"
+
+clap = { version = "4", features = ["derive"] }
+
+[[bin]]
+name = "openmerc"
+path = "src/main.rs"
