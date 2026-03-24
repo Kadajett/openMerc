@@ -293,6 +293,88 @@ pub fn tool_definitions() -> Vec<ToolDef> {
                 }),
             },
         },
+        // --- Tmux environment tools ---
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: FunctionDef {
+                name: "tmux_info".to_string(),
+                description: "Get current tmux environment info: session, window, pane IDs. You ARE running inside tmux.".to_string(),
+                parameters: json!({ "type": "object", "properties": {}, "required": [] }),
+            },
+        },
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: FunctionDef {
+                name: "tmux_run".to_string(),
+                description: "Run a shell command in a tmux pane. If pane_id is empty, creates a new split pane. Returns the output.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "pane_id": { "type": "string", "description": "Target pane ID (e.g. %1). Empty string to create new pane." },
+                        "command": { "type": "string", "description": "Shell command to run" }
+                    },
+                    "required": ["command"]
+                }),
+            },
+        },
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: FunctionDef {
+                name: "tmux_capture".to_string(),
+                description: "Capture the last N lines of output from a tmux pane. Use to read what another process is displaying.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "pane_id": { "type": "string", "description": "Pane ID to capture from (e.g. %1)" },
+                        "lines": { "type": "integer", "description": "Number of lines to capture (default 20)" }
+                    },
+                    "required": ["pane_id"]
+                }),
+            },
+        },
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: FunctionDef {
+                name: "tmux_send_keys".to_string(),
+                description: "Send keystrokes to a tmux pane. For text, it types character by character. Supports special keys: Enter, Escape, C-c, Up, Down. Use to interact with TUI apps in other panes.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "pane_id": { "type": "string", "description": "Target pane ID" },
+                        "keys": { "type": "string", "description": "Keys to send. Text is typed literally. Special: Enter, Escape, C-c, Up, Down" }
+                    },
+                    "required": ["pane_id", "keys"]
+                }),
+            },
+        },
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: FunctionDef {
+                name: "spawn_agent".to_string(),
+                description: "Build and spawn a new openMerc instance in a split tmux pane. Use to test changes: build, spawn, interact via tmux_send_keys, capture output, then kill with tmux_kill_pane. Returns the new pane ID.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "extra_env": { "type": "string", "description": "Extra environment variables (e.g. INCEPTION_API_KEY=xxx). Empty for defaults." }
+                    },
+                    "required": []
+                }),
+            },
+        },
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: FunctionDef {
+                name: "tmux_kill_pane".to_string(),
+                description: "Kill a tmux pane by ID. Use to clean up after testing.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "pane_id": { "type": "string", "description": "Pane ID to kill" }
+                    },
+                    "required": ["pane_id"]
+                }),
+            },
+        },
     ]
 }
 
@@ -445,6 +527,33 @@ pub async fn execute_tool(ctx: &ToolContext, tool_call: &ToolCall) -> String {
                 }
                 Err(e) => format!("Failed to execute semfora-engine analyze: {}", e),
             }
+        }
+        // --- Tmux tools ---
+        "tmux_info" => {
+            super::tmux::tmux_info()
+        }
+        "tmux_run" => {
+            let pane_id = args["pane_id"].as_str().unwrap_or("");
+            let command = args["command"].as_str().unwrap_or("");
+            super::tmux::tmux_run(pane_id, command)
+        }
+        "tmux_capture" => {
+            let pane_id = args["pane_id"].as_str().unwrap_or("");
+            let lines = args["lines"].as_u64().unwrap_or(20) as u32;
+            super::tmux::tmux_capture(pane_id, lines)
+        }
+        "tmux_send_keys" => {
+            let pane_id = args["pane_id"].as_str().unwrap_or("");
+            let keys = args["keys"].as_str().unwrap_or("");
+            super::tmux::tmux_send_keys(pane_id, keys)
+        }
+        "spawn_agent" => {
+            let extra_env = args["extra_env"].as_str().unwrap_or("");
+            super::tmux::spawn_agent(workspace, extra_env)
+        }
+        "tmux_kill_pane" => {
+            let pane_id = args["pane_id"].as_str().unwrap_or("");
+            super::tmux::tmux_kill_pane(pane_id)
         }
         other => format!("Unknown tool: {other}"),
     }

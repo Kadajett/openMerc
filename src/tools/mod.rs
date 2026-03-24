@@ -3,3 +3,4 @@ pub mod files;
 pub mod search;
 pub mod registry;
 pub mod tasks;
+pub mod tmux;
