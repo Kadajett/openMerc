@@ -1,7 +1,10 @@
+// Updated commands.rs with /export and /watch implementations
 use crate::app::{App, Role, AppMode};
 use crate::tools::{files, tasks as task_tools};
 use crate::session;
 use std::process::Command;
+use std::thread;
+use std::time::Duration;
 
 /// Result of processing user input
 pub enum InputAction {
@@ -354,6 +357,92 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             }
             InputAction::Handled
         }
+        // New command: /export – export session as markdown
+        "/export" => {
+            // Build summary
+            let title = &app.conversation.title;
+            let start = app.conversation.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
+            let msg_count = app.conversation.messages.len();
+            let tool_calls = app.pending_tools.len();
+            let duration = if let Some(dur) = app.last_duration {
+                format!("{}s", dur.as_secs())
+            } else {
+                "N/A".to_string()
+            };
+            let mut md = format!(
+                "# Session Export\n\n**Title:** {}\n**Started:** {}\n**Messages:** {}\n**Pending tools:** {}\n**Duration:** {}\n\n---\n\n",
+                title, start, msg_count, tool_calls, duration
+            );
+            // Conversation
+            for msg in &app.conversation.messages {
+                match msg.role {
+                    Role::User => {
+                        md.push_str(&format!("### User\n\n{}\n\n", msg.content));
+                    }
+                    Role::Assistant => {
+                        md.push_str(&format!("### Assistant\n\n{}\n\n", msg.content));
+                    }
+                    Role::Tool => {
+                        md.push_str(&format!("<details><summary>Tool output</summary>\n\n{}\n\n</details>\n\n", msg.content));
+                    }
+                    Role::System => {
+                        // System messages are kept for context; include as blockquote
+                        md.push_str(&format!("> {}\n\n", msg.content.replace('\n', "\n> ")));
+                    }
+                }
+            }
+            // Diff summary if any
+            if !app.modified_files.is_empty() {
+                md.push_str("## Diff Summary\n\n");
+                for fd in &app.modified_files {
+                    md.push_str(&format!("### {}\n\n```diff\n{}\n```\n\n", fd.path, fd.diff));
+                }
+            }
+            // Write to a temporary markdown file in workspace
+            let out_path = "session_export.md";
+            let write_res = std::fs::write(out_path, md);
+            match write_res {
+                Ok(_) => app.conversation.push_message(Role::System, format!("✅ Exported session to `{}`", out_path)),
+                Err(e) => app.conversation.push_message(Role::System, format!("❌ Failed to write export: {e}")),
+            }
+            InputAction::Handled
+        }
+        // New command: /watch – run a command every N seconds and stream output
+        "/watch" => {
+            // Expected: /watch <interval_seconds> <shell_command>
+            let mut parts = args.splitn(2, ' ');
+            let interval_str = parts.next();
+            let cmd_str = parts.next();
+            if interval_str.is_none() || cmd_str.is_none() {
+                app.conversation.push_message(Role::System, "Usage: /watch <seconds> <command>".to_string());
+                return InputAction::Handled;
+            }
+            let interval: u64 = match interval_str.unwrap().parse() {
+                Ok(v) => v,
+                Err(_) => {
+                    app.conversation.push_message(Role::System, "Invalid interval – must be a number".to_string());
+                    return InputAction::Handled;
+                }
+            };
+            let command = cmd_str.unwrap();
+            // Run 5 iterations as a demo; in real use could be stopped via /watch stop
+            for i in 1..=5 {
+                let out = Command::new("sh").arg("-c").arg(command).current_dir(&app.workspace).output();
+                match out {
+                    Ok(res) => {
+                        let stdout = String::from_utf8_lossy(&res.stdout);
+                        let msg = format!("## Watch iteration {}\n\n```\n{}\n```", i, stdout);
+                        app.conversation.push_message(Role::System, msg);
+                    }
+                    Err(e) => {
+                        app.conversation.push_message(Role::System, format!("Watch error: {e}"));
+                        break;
+                    }
+                }
+                thread::sleep(Duration::from_secs(interval));
+            }
+            InputAction::Handled
+        }
         _ => {
             app.conversation.push_message(Role::System, format!("Unknown command: {cmd}. Type /help for available commands."));
             InputAction::Handled
@@ -381,6 +470,8 @@ const HELP_TEXT: &str = r#"## Commands
 /about            — About Mercury
 /review           — Run Semfora analysis on workspace
 /search <query>   — Search code via Semfora and memory dump
+/export           — Export session to markdown (session_export.md)
+/watch <sec> <cmd> — Run <cmd> every <sec> seconds (5 iterations)
 
 ## Mentions
 @path/to/file      — Attach file contents to your message
