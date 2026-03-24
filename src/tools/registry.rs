@@ -46,6 +46,20 @@ pub struct ToolCallFunction {
 }
 
 /// Build the list of tools to send to Mercury
+/// Get tool definitions. If include_task_tools is false, excludes
+/// create_task/update_task/list_tasks/add_task_note to prevent
+/// Mercury from calling them on every message.
+pub fn tool_definitions_filtered(include_task_tools: bool) -> Vec<ToolDef> {
+    let mut tools = tool_definitions();
+    if !include_task_tools {
+        tools.retain(|t| {
+            !matches!(t.function.name.as_str(),
+                "create_task" | "update_task" | "list_tasks" | "add_task_note")
+        });
+    }
+    tools
+}
+
 pub fn tool_definitions() -> Vec<ToolDef> {
     vec![
         ToolDef {

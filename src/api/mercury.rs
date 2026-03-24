@@ -349,10 +349,11 @@ impl MercuryClient {
         let mut chat_messages = self.build_messages(system_context, session_summary.as_deref(), messages);
 
         // Router: use Mercury structured output to decide chat vs tools
-        let last_user_msg = messages.iter().rev()
+        let last_user_msg_owned = messages.iter().rev()
             .find(|m| m.role == crate::app::Role::User)
             .map(|m| m.content.clone())
             .unwrap_or_default();
+        let last_user_msg = last_user_msg_owned.clone();
 
         let router_messages = vec![
             ChatMessage {
@@ -408,8 +409,16 @@ impl MercuryClient {
 
         if is_chat { return; } // Already sent the response above
 
-        // Tool-calling mode — full tool loop
-        let tools = registry::tool_definitions();
+        // Tool-calling mode — only include task tools if the message mentions tasks
+        let last_msg_lower = messages.iter().rev()
+            .find(|m| m.role == crate::app::Role::User)
+            .map(|m| m.content.to_lowercase())
+            .unwrap_or_default();
+        let include_tasks = last_msg_lower.contains("task")
+            || last_msg_lower.contains("plan")
+            || last_msg_lower.contains("improve")
+            || messages.iter().any(|m| m.role == crate::app::Role::User && m.content.to_lowercase().contains("task"));
+        let tools = registry::tool_definitions_filtered(include_tasks);
         let max_rounds = 100_u32;
         match self.run_tool_loop(&mut chat_messages, &tools, max_rounds, tool_ctx, &event_tx, &cancel).await {
             Ok(Some(early)) => {
