@@ -400,7 +400,19 @@ fn handle_input_key(
                     commands::InputAction::Handled => {}
                     commands::InputAction::Chat { message, injected_context } => {
                         if !message.is_empty() || !injected_context.is_empty() {
-                            if !message.is_empty() { app.conversation.push_message(Role::User, message.clone()); }
+                            if !message.is_empty() {
+                                app.conversation.push_message(Role::User, message.clone());
+                                // Auto title naming: set title based on first user message
+                                if app.conversation.title == "New Chat" {
+                                    let words: Vec<&str> = message.split_whitespace().take(6).collect();
+                                    let mut title = words.join(" ");
+                                    if title.len() > 30 {
+                                        title.truncate(30);
+                                    }
+                                    app.conversation.title = title.clone();
+                                    app.conversation.push_message(Role::System, format!("Session title set to: {}", title));
+                                }
+                            }
                             app.chat_scroll = 0;
                             app.loading = true;
                             app.request_started = Some(std::time::Instant::now());
@@ -409,7 +421,8 @@ fn handle_input_key(
                             let mercury = mercury.clone();
                             let honcho = honcho.clone();
                             let base_prompt = system_prompt.to_string();
-                            let messages = app.conversation.messages.clone();
+                            let mut messages = app.conversation.messages.clone();
+                            messages.push(app::Message { id: uuid::Uuid::new_v4().to_string(), role: app::Role::User, content: "Continue working on the remaining tasks. Use list_tasks to see what is left, then work on the next one.".to_string(), timestamp: chrono::Utc::now() });
                             let tx = event_tx.clone();
                             let workspace_clone = app.workspace.clone();
                             let tasks_arc = Arc::new(Mutex::new(app.tasks.clone()));
@@ -418,7 +431,7 @@ fn handle_input_key(
                             let task_context = app.tasks_as_context().unwrap_or_default();
                             let tasks_for_sync = tasks_arc.clone();
                             tokio::spawn(async move {
-                                let mut enriched_prompt = { let h = honcho.lock().await; h.enrich_system_prompt(&base_prompt, &message).await };
+                                let mut enriched_prompt = { let h = honcho.lock().await; h.enrich_system_prompt(&base_prompt, "continue tasks").await };
                                 if !task_context.is_empty() { enriched_prompt = format!("{enriched_prompt}\n\n{task_context}"); }
                                 let tool_ctx = tools::registry::ToolContext { workspace: workspace_clone, tasks: tasks_for_sync, honcho: honcho.clone() };
                                 mercury.chat(Some(&enriched_prompt), &messages, tool_ctx, tx, cancel).await;
