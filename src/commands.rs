@@ -443,6 +443,116 @@ fn handle_slash_command(app: &mut App, input: &str) -> InputAction {
             }
             InputAction::Handled
         }
+        // New command: /pr – generate PR description from git diff, create branch, open PR via gh
+        "/pr" => {
+            if args.is_empty() {
+                app.conversation.push_message(Role::System, "Usage: /pr <pr-title>".to_string());
+                return InputAction::Handled;
+            }
+            let title = args.trim();
+            // Create a new branch based on title (slugified)
+            let branch_name = title.to_lowercase().replace(' ', "_").replace('-', "_");
+            // git checkout -b <branch>
+            let checkout = Command::new("git")
+                .arg("checkout")
+                .arg("-b")
+                .arg(&branch_name)
+                .current_dir(&app.workspace)
+                .output();
+            match checkout {
+                Ok(out) if out.status.success() => {
+                    // Get diff summary
+                    let diff = Command::new("git")
+                        .arg("diff")
+                        .arg("--stat")
+                        .current_dir(&app.workspace)
+                        .output();
+                    let diff_summary = match diff {
+                        Ok(d) => String::from_utf8_lossy(&d.stdout).to_string(),
+                        Err(e) => format!("Error getting diff: {e}")
+                    };
+                    // Build PR body
+                    let body = format!("## Summary\n{}\n\n## Diff\n```diff\n{}\n```", title, diff_summary);
+                    // gh pr create
+                    let gh = Command::new("gh")
+                        .arg("pr")
+                        .arg("create")
+                        .arg("--title")
+                        .arg(title)
+                        .arg("--body")
+                        .arg(&body)
+                        .arg("--head")
+                        .arg(&branch_name)
+                        .current_dir(&app.workspace)
+                        .output();
+                    match gh {
+                        Ok(out) => {
+                            let out_str = String::from_utf8_lossy(&out.stdout);
+                            app.conversation.push_message(Role::System, format!("PR created:\n{}", out_str));
+                        }
+                        Err(e) => {
+                            app.conversation.push_message(Role::System, format!("Error creating PR: {e}"));
+                        }
+                    }
+                }
+                Ok(out) => {
+                    let err = String::from_utf8_lossy(&out.stderr);
+                    app.conversation.push_message(Role::System, format!("git checkout failed: {}", err));
+                }
+                Err(e) => {
+                    app.conversation.push_message(Role::System, format!("Failed to run git checkout: {e}"));
+                }
+            }
+            InputAction::Handled
+        }
+        // New command: /test – run cargo test and format results
+        "/test" => {
+            let out = Command::new("cargo")
+                .arg("test")
+                .arg("--quiet")
+                .current_dir(&app.workspace)
+                .output();
+            match out {
+                Ok(res) => {
+                    let stdout = String::from_utf8_lossy(&res.stdout);
+                    let stderr = String::from_utf8_lossy(&res.stderr);
+                    let mut msg = String::new();
+                    if res.status.success() {
+                        msg.push_str("## Cargo test passed\n\n```\n");
+                        msg.push_str(&stdout);
+                        msg.push_str("\n```\n");
+                    } else {
+                        msg.push_str("## Cargo test failed\n\n```\n");
+                        msg.push_str(&stderr);
+                        msg.push_str("\n```\n");
+                    }
+                    app.conversation.push_message(Role::System, msg);
+                }
+                Err(e) => {
+                    app.conversation.push_message(Role::System, format!("Error running cargo test: {e}"));
+                }
+            }
+            InputAction::Handled
+        }
+        // New command: /history – show recent git commits
+        "/history" => {
+            let out = Command::new("git")
+                .arg("log")
+                .arg("--oneline")
+                .arg("-10")
+                .current_dir(&app.workspace)
+                .output();
+            match out {
+                Ok(res) => {
+                    let log = String::from_utf8_lossy(&res.stdout);
+                    app.conversation.push_message(Role::System, format!("## Recent commits (last 10)\n{}", log));
+                }
+                Err(e) => {
+                    app.conversation.push_message(Role::System, format!("Error getting git history: {e}"));
+                }
+            }
+            InputAction::Handled
+        }
         _ => {
             app.conversation.push_message(Role::System, format!("Unknown command: {cmd}. Type /help for available commands."));
             InputAction::Handled
@@ -472,6 +582,9 @@ const HELP_TEXT: &str = r#"## Commands
 /search <query>   — Search code via Semfora and memory dump
 /export           — Export session to markdown (session_export.md)
 /watch <sec> <cmd> — Run <cmd> every <sec> seconds (5 iterations)
+/pr <title>       — Create a PR branch and open PR via gh
+/test             — Run cargo test and show results
+/history          — Show recent git commits (last 10)
 
 ## Mentions
 @path/to/file      — Attach file contents to your message
