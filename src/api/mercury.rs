@@ -167,6 +167,9 @@ impl MercuryClient {
 
     async fn call_api(&self, req: &ChatRequest) -> Result<ChatResponse> {
         let url = format!("{}/chat/completions", self.base_url);
+        let tool_count = req.tools.as_ref().map(|t| t.len()).unwrap_or(0);
+        let msg_count = req.messages.len();
+        logger::log("API_CALL", &format!("tools={tool_count} msgs={msg_count} stream={} diffusing={}", req.stream, req.diffusing));
         let body = serde_json::to_string(req).unwrap_or_default();
         logger::log_api_request(&url, &body);
         let resp = self.client.post(&url)
@@ -348,77 +351,38 @@ impl MercuryClient {
         };
         let mut chat_messages = self.build_messages(system_context, session_summary.as_deref(), messages);
 
-        // Router: use Mercury structured output to decide chat vs tools
-        let last_user_msg_owned = messages.iter().rev()
-            .find(|m| m.role == crate::app::Role::User)
-            .map(|m| m.content.clone())
-            .unwrap_or_default();
-        let last_user_msg = last_user_msg_owned.clone();
-
-        let router_messages = vec![
-            ChatMessage {
-                role: "system".to_string(),
-                content: Some("You are a router. Respond ONLY with JSON. If the user wants to READ files, WRITE files, RUN commands, SEARCH code, CREATE tasks, or do ANY coding work: {\"needs_tools\": true, \"response\": \"\"}. If the user is just chatting, asking questions, or greeting: {\"needs_tools\": false, \"response\": \"your reply\"}".to_string()),
-                tool_calls: None,
-                tool_call_id: None,
-            },
-            ChatMessage {
-                role: "user".to_string(),
-                content: Some(last_user_msg),
-                tool_calls: None,
-                tool_call_id: None,
-            },
-        ];
-
-        let router_req = ChatRequest {
+        // Try without tools first. If Mercury returns content, use it directly.
+        // If Mercury returns empty (wanted tools), retry with tools.
+        let first_req = ChatRequest {
             model: self.model.clone(),
-            messages: router_messages,
+            messages: chat_messages.clone(),
             stream: false,
-            max_tokens: Some(300),
+            max_tokens: Some(self.max_tokens),
             tools: None,
             diffusing: false,
         };
 
-        let is_chat = match self.call_api(&router_req).await {
+        match self.call_api(&first_req).await {
             Ok(resp) => {
                 if let Some(usage) = &resp.usage {
                     let _ = event_tx.send(AppEvent::TokensUsed(usage.total_tokens, usage.prompt_tokens, usage.completion_tokens));
                 }
-                if let Some(content) = resp.choices.first().and_then(|c| c.message.content.as_ref()) {
-                    // Try to parse the JSON response
-                    if let Some(start) = content.find('{') {
-                        if let Some(end) = content.rfind('}') {
-                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content[start..=end]) {
-                                let needs_tools = v["needs_tools"].as_bool().unwrap_or(true);
-                                if !needs_tools {
-                                    let response = v["response"].as_str().unwrap_or("").to_string();
-                                    if !response.is_empty() {
-                                        let _ = event_tx.send(AppEvent::DiffusionUpdate(response));
-                                        let _ = event_tx.send(AppEvent::StreamDone);
-                                        return;
-                                    }
-                                }
-                                !needs_tools
-                            } else { false }
-                        } else { false }
-                    } else { false }
-                } else { false }
+                if let Some(choice) = resp.choices.first() {
+                    if let Some(content) = &choice.message.content {
+                        if !content.is_empty() && choice.message.tool_calls.is_none() {
+                            // Mercury responded with content and no tool calls — direct chat
+                            let _ = event_tx.send(AppEvent::DiffusionUpdate(content.clone()));
+                            let _ = event_tx.send(AppEvent::StreamDone);
+                            return;
+                        }
+                    }
+                }
             }
-            Err(_) => false,
-        };
+            Err(_) => {} // Fall through to tool mode
+        }
 
-        if is_chat { return; } // Already sent the response above
-
-        // Tool-calling mode — only include task tools if the message mentions tasks
-        let last_msg_lower = messages.iter().rev()
-            .find(|m| m.role == crate::app::Role::User)
-            .map(|m| m.content.to_lowercase())
-            .unwrap_or_default();
-        let include_tasks = last_msg_lower.contains("task")
-            || last_msg_lower.contains("plan")
-            || last_msg_lower.contains("improve")
-            || messages.iter().any(|m| m.role == crate::app::Role::User && m.content.to_lowercase().contains("task"));
-        let tools = registry::tool_definitions_filtered(include_tasks);
+        // Mercury returned empty or wanted tools — retry with full tool set
+        let tools = registry::tool_definitions();
         let max_rounds = 100_u32;
         match self.run_tool_loop(&mut chat_messages, &tools, max_rounds, tool_ctx, &event_tx, &cancel).await {
             Ok(Some(early)) => {
