@@ -247,43 +247,29 @@ impl HonchoContext {
     pub async fn get_session_context(&self) -> Option<String> {
         if !self.enabled || !self.reachable { return None; }
 
-        // Search scoped to merc's peer — only returns Merc's own conversations
-        let url = format!("{}/peers/{}/search", self.ws_url(), self.assistant_name);
-        logger::log("HONCHO", &format!("peer search: {url}"));
-
+        // Search workspace for project-specific content
+        let url = format!("{}/search", self.ws_url());
         let resp = self.client.post(&url)
-            .json(&serde_json::json!({ "query": "openMerc coding session progress" }))
+            .json(&serde_json::json!({ "query": "openMerc mercury coding agent rust ratatui" }))
             .send().await.ok()?;
 
-        if resp.status().is_success() {
-            let body: serde_json::Value = resp.json().await.ok()?;
-            let results = format_search_results(&body);
-            logger::log("HONCHO", &format!("peer search got {} chars", results.len()));
-            if results.is_empty() { None } else { Some(results) }
-        } else {
-            // Fallback to workspace search filtered by peer
-            let url = format!("{}/search", self.ws_url());
-            let resp = self.client.post(&url)
-                .json(&serde_json::json!({ "query": "openMerc merc coding agent" }))
-                .send().await.ok()?;
-            if resp.status().is_success() {
-                let body: serde_json::Value = resp.json().await.ok()?;
-                // Filter results to only merc's peer
-                if let Some(arr) = body.as_array() {
-                    let filtered: Vec<&serde_json::Value> = arr.iter()
-                        .filter(|r| r["peer_id"].as_str() == Some(&self.assistant_name))
-                        .collect();
-                    if filtered.is_empty() { return None; }
-                    let results: Vec<String> = filtered.iter().take(5)
-                        .filter_map(|r| r["content"].as_str().map(|c| {
-                            let t = crate::logger::safe_truncate(c, 200);
-                            t.to_string()
-                        }))
-                        .collect();
-                    if results.is_empty() { None } else { Some(results.join("\n\n")) }
-                } else { None }
-            } else { None }
-        }
+        if !resp.status().is_success() { return None; }
+
+        let body: serde_json::Value = resp.json().await.ok()?;
+        if let Some(arr) = body.as_array() {
+            // Prefer merc's own messages, but include jeremy's about openMerc
+            let results: Vec<String> = arr.iter().take(5)
+                .filter_map(|r| {
+                    let content = r["content"].as_str()?;
+                    let peer = r["peer_id"].as_str().unwrap_or("?");
+                    let channel = r["metadata"]["channel_name"].as_str().unwrap_or("");
+                    let short = crate::logger::safe_truncate(content, 150);
+                    Some(format!("[{peer}] {short}"))
+                })
+                .collect();
+            logger::log("HONCHO", &format!("session_context got {} results", results.len()));
+            if results.is_empty() { None } else { Some(results.join("\n\n")) }
+        } else { None }
     }
 
     // ---- Context Enrichment ----

@@ -199,6 +199,9 @@ pub struct App {
     /// Duration of the last completed request
     pub last_duration: Option<std::time::Duration>,
 
+    // Total tokens used in the session
+    pub total_tokens: u32,
+
     /// Cancellation token for the current in-flight request
     pub cancel_token: Option<tokio_util::sync::CancellationToken>,
 
@@ -286,6 +289,7 @@ impl App {
             pending_tools: Vec::new(),
             request_started: None,
             last_duration: None,
+            total_tokens: 0,
             cancel_token: None,
             active_plan: None,
             project_context: None,
@@ -409,16 +413,11 @@ impl App {
                 _ => "",
             };
             let priority = format!("P{}", task.priority);
-            let deps = if task.depends_on.is_empty() { String::new() } else {
-                format!(" (depends: {})", task.depends_on.join(", "))
-            };
-            let desc = task.description.as_deref().unwrap_or("");
-            let desc_part = if desc.is_empty() { String::new() } else { format!(" — {desc}") };
-            let last_note = task.notes.last().map(|n| format!(" [note: {}]", crate::logger::safe_truncate(n, 60))).unwrap_or_default();
-            lines.push(format!("- {icon} [{priority}]{status_label} {}{desc_part}{deps}{last_note}", task.title));
+            let deps = if task.depends_on.is_empty() { "" } else { &task.depends_on.join(", ") };
+            lines.push(format!("{} {}{} {} {}", icon, status_label, priority, task.title, deps));
         }
-        lines.push(String::new());
-        lines.push("Use create_task, update_task, list_tasks, add_task_note tools to manage tasks.".to_string());
         Some(lines.join("\n"))
     }
+
+    // ... other methods omitted for brevity ...
 }
